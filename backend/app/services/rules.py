@@ -106,10 +106,11 @@ class RuleEngine:
         for (page_index, role), items in grouped.items():
             sizes = {round(item.output_font_size, 2) for item in items}
             if len(sizes) > 1 and role in {"body", "figure_label", "section_title", "title"}:
+                severity = GateSeverity.warning if role == "figure_label" else GateSeverity.hard_fail
                 failures.append(
                     GateResult(
                         code="same_role_font_mismatch",
-                        severity=GateSeverity.hard_fail,
+                        severity=severity,
                         passed=False,
                         page_index=page_index,
                         message=f"Same role has mixed font sizes: {role}.",

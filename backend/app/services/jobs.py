@@ -54,9 +54,16 @@ class JobStore:
         self.jobs[job_id] = record
         return record
 
+    @staticmethod
+    def public_dump(record: JobRecord) -> dict:
+        return record.model_dump(mode="json", exclude={"options": {"api_key"}})
+
     def _persist(self, record: JobRecord) -> None:
         meta_path = self.root / record.id / "job.json"
-        meta_path.write_text(record.model_dump_json(indent=2), encoding="utf-8")
+        payload = record.model_dump(mode="json")
+        if record.options.api_key:
+            payload.setdefault("options", {})["api_key"] = record.options.api_key
+        meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _set_progress(
         self,

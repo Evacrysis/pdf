@@ -162,6 +162,8 @@ def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
         slot = min(page.rect.width - 72, max(desired, below_artwork.width * 1.35))
         return max(4, slot)
     if src.role in {"title", "section_title", "subsection_title", "emphasis"}:
+        if src.role == "emphasis" and original > page.rect.width * 0.6:
+            return max(4, min(original, page.rect.width - x0 - 72))
         return max(original, available)
     if desired <= available:
         return max(original, desired)
@@ -196,10 +198,9 @@ def _label_start_x(
     label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
     safe_gap = max(14, item.output_font_size * 1.15)
     if side == "left":
-        target = artwork.x0 - safe_gap - label_width
-        return max(36, min(source_x, target))
+        return max(36, artwork.x0 - safe_gap - label_width)
     target = artwork.x1 + safe_gap
-    return min(max(target, source_x), page.rect.width - 36 - label_width)
+    return min(target, page.rect.width - 36 - label_width)
 
 
 def _baseline(item: TranslatedLine) -> float:

@@ -33,6 +33,35 @@ def _merge(lines: list[TextLine], count: int, text: str) -> TextLine:
     )
 
 
+def _is_continuation_line(first: TextLine, candidate: TextLine) -> bool:
+    if candidate.page_index != first.page_index:
+        return False
+    if first.role != candidate.role or first.role not in {"body", "emphasis"}:
+        return False
+    if abs(first.font_size - candidate.font_size) > 0.35:
+        return False
+    if abs(first.bbox[0] - candidate.bbox[0]) > 3:
+        return False
+    if candidate.bbox[1] - first.bbox[1] > first.font_size * 3.2:
+        return False
+    return len(_norm(candidate.text)) >= 12
+
+
+def _merge_continuation_paragraph(lines: list[TextLine]) -> tuple[TextLine, int] | None:
+    first = lines[0]
+    if first.role not in {"body", "emphasis"} or len(_norm(first.text)) < 24:
+        return None
+    group = [first]
+    for candidate in lines[1:4]:
+        if not _is_continuation_line(first, candidate):
+            break
+        group.append(candidate)
+    if len(group) < 2:
+        return None
+    text = " ".join(_norm(line.text) for line in group)
+    return _merge(group, len(group), text), len(group)
+
+
 def merge_known_semantic_lines(lines: list[TextLine]) -> list[TextLine]:
     """Merge repeated manual fragments that must be translated as one semantic unit."""
     result: list[TextLine] = []
@@ -72,6 +101,13 @@ def merge_known_semantic_lines(lines: list[TextLine]) -> list[TextLine]:
             i += 2
             continue
 
+        paragraph = _merge_continuation_paragraph(same_page)
+        if paragraph is not None:
+            merged, consumed = paragraph
+            result.append(merged)
+            i += consumed
+            continue
+
         result.append(current)
         i += 1
     return result
@@ -99,6 +135,7 @@ FIXED_TRANSLATIONS = {
     "Only when Shangri-la Shades reach the bottom limit can slats be adjusted.": "シャングリラシェードが下限に達したときのみ、スラットを調整できます。",
     "Tilt vanes": "チルトベーン",
     "Adjust the overlap of stripes": "縞模様の重なりを調整する",
+    "Congratulations! Remove the sleeping blocker, chooes the channel number (attached to the bottom rod ) to control the shade. If it cannot work, please refer to page 9-17.": "おめでとうございます！スリープブロッカーを取り外し、\n（下部ロッドに取り付けた）チャンネル番号を選択してシェードを操作してください。\n動作しない場合は、9～17ページを参照してください。",
 }
 
 

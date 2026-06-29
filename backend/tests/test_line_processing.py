@@ -16,6 +16,20 @@ def _line(index: int, text: str, bbox: tuple[float, float, float, float]) -> Tex
     )
 
 
+def _warning_line(index: int, text: str, y0: float) -> TextLine:
+    return TextLine(
+        page_index=0,
+        line_index=index,
+        text=text,
+        bbox=(84.4, y0, 558.8, y0 + 20),
+        origin=(84.4, y0 + 15.5),
+        font_name="Helvetica",
+        font_size=14,
+        role="emphasis",
+        localizable=True,
+    )
+
+
 def test_merges_1_9_channel_semantic_pair() -> None:
     lines = [
         _line(0, "1-9 Channel: One channel ", (10, 10, 110, 25)),
@@ -56,3 +70,17 @@ def test_merges_example_operation_paragraph() -> None:
         "シェードが9台あり、そのうち1・3・5を同時に開ける場合は、\n"
         "「1」→「3」→「5」の順に押し、その後「開」を押します。"
     )
+
+
+def test_continuation_warning_lines_merge_into_one_semantic_block() -> None:
+    lines = [
+        _warning_line(0, "Congratulations! Remove the sleeping blocker, chooes the channel number", 509.1),
+        _warning_line(1, "(attached to the bottom rod ) to control the shade. If it cannot work, please", 525.1),
+        _warning_line(2, "refer to page 9-17.", 541.1),
+    ]
+
+    merged = merge_known_semantic_lines(lines)
+
+    assert len(merged) == 1
+    assert "refer to page 9-17" in merged[0].text
+    assert fixed_translation_for(merged[0]) is not None

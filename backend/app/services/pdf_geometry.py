@@ -24,6 +24,19 @@ def _dominant_span(line: dict) -> dict:
     return max(spans, key=lambda span: len(span.get("text", "")))
 
 
+def _line_origin(line: dict, dominant: dict) -> tuple[float, float] | None:
+    spans = [span for span in line.get("spans", []) if span.get("text", "").strip() and span.get("origin")]
+    if not spans:
+        return None
+    x = min(float(span["origin"][0]) for span in spans)
+    dominant_origin = dominant.get("origin")
+    if dominant_origin:
+        y = float(dominant_origin[1])
+    else:
+        y = float(spans[0]["origin"][1])
+    return (x, y)
+
+
 def _is_localizable(text: str) -> bool:
     if not text:
         return False
@@ -72,7 +85,7 @@ def extract_text_lines(pdf_path: str) -> list[TextLine]:
                     continue
                 span = _dominant_span(raw_line)
                 bbox = tuple(float(v) for v in raw_line.get("bbox", (0, 0, 0, 0)))
-                origin = span.get("origin")
+                origin = _line_origin(raw_line, span)
                 tokens = [token for token in PROTECTED_TOKEN_RE.findall(text) if token.strip()]
                 page_lines.append(
                     TextLine(
@@ -80,7 +93,7 @@ def extract_text_lines(pdf_path: str) -> list[TextLine]:
                         line_index=len(page_lines),
                         text=text,
                         bbox=bbox,
-                        origin=tuple(float(v) for v in origin) if origin else None,
+                        origin=origin,
                         font_name=str(span.get("font", "")),
                         font_size=float(span.get("size", 0)),
                         protected_tokens=tokens,

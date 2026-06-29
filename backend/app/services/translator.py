@@ -117,7 +117,7 @@ class OpenAICompatibleTranslator(Translator):
 
         api_key = options.api_key or settings.openai_api_key
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is required for strict translation jobs")
+            raise RuntimeError("API Key is required for OpenAI-compatible translation jobs")
 
         base_url = (options.base_url or settings.openai_base_url).rstrip("/")
         model = options.model or settings.default_model

@@ -93,7 +93,7 @@ async def create_job(
     )
     record = await job_store.create(file, options)
     background_tasks.add_task(job_store.process, record.id)
-    return record.model_dump(mode="json")
+    return job_store.public_dump(record)
 
 
 @app.get("/api/jobs/{job_id}")
@@ -101,7 +101,7 @@ async def get_job(job_id: str) -> dict:
     record = job_store.get(job_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Job not found.")
-    return record.model_dump(mode="json")
+    return job_store.public_dump(record)
 
 
 @app.get("/api/jobs/{job_id}/download")

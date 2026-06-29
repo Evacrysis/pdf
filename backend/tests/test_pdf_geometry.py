@@ -3,7 +3,7 @@ from pathlib import Path
 
 import fitz
 
-from app.services.pdf_geometry import PROTECTED_TOKEN_RE, _classify_roles, _is_localizable, extract_text_lines
+from app.services.pdf_geometry import PROTECTED_TOKEN_RE, _classify_roles, _is_localizable, _line_origin, extract_text_lines
 
 
 def test_protected_tokens_do_not_match_inside_words() -> None:
@@ -67,3 +67,15 @@ def test_extract_text_lines_preserves_span_origin(tmp_path: Path) -> None:
     lines = extract_text_lines(str(source))
 
     assert lines[0].origin == (24.0, 64.0)
+
+
+def test_line_origin_uses_leftmost_span_x_and_dominant_baseline() -> None:
+    raw_line = {
+        "spans": [
+            {"text": "（下部ロッドに取り付けて）", "origin": (267.4, 540.6)},
+            {"text": "Congratulations", "origin": (84.4, 540.6)},
+        ]
+    }
+    dominant = raw_line["spans"][0]
+
+    assert _line_origin(raw_line, dominant) == (84.4, 540.6)

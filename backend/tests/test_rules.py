@@ -4,7 +4,13 @@ from app.models import JobRecord, JobStatus, TextLine, TranslatedLine, Translati
 from app.services.rules import RuleEngine
 
 
-def line(text: str, translated: str, size: float = 12, output_size: Optional[float] = None) -> TranslatedLine:
+def line(
+    text: str,
+    translated: str,
+    size: float = 12,
+    output_size: Optional[float] = None,
+    role: str = "body",
+) -> TranslatedLine:
     src = TextLine(
         page_index=0,
         line_index=0,
@@ -12,7 +18,7 @@ def line(text: str, translated: str, size: float = 12, output_size: Optional[flo
         bbox=(0, 0, 100, 20),
         font_name="Helvetica",
         font_size=size,
-        role="body",
+        role=role,
         protected_tokens=[],
         localizable=True,
     )
@@ -39,6 +45,19 @@ def test_rejects_missing_protected_token() -> None:
     item.source.protected_tokens = ['"OK"']
     results = RuleEngine().validate([item])
     assert any(result.code == "protected_token_missing" for result in results)
+
+
+def test_figure_label_source_size_variation_is_warning_not_hard_fail() -> None:
+    results = RuleEngine().validate(
+        [
+            line("PULL", "引く", size=7.16, role="figure_label"),
+            line("REMOVE", "取り外す", size=2.94, role="figure_label"),
+        ]
+    )
+
+    matching = [result for result in results if result.code == "same_role_font_mismatch"]
+    assert matching
+    assert matching[0].severity == "warning"
 
 
 def test_rejects_known_fixed_translation_mismatch() -> None:

@@ -307,3 +307,40 @@ def test_lower_right_diagram_label_stays_right_aligned(tmp_path) -> None:
         doc.close()
 
     assert x >= 220 + 55 + 14
+
+
+def test_wide_emphasis_paragraph_keeps_right_safety_margin(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    page = doc[0]
+    font = fitz.Font(fontfile=str(font_path))
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Congratulations! Remove the sleeping blocker, chooes the channel number refer to page 9-17.",
+        bbox=(84.4, 509.1, 558.8, 561.1),
+        origin=(84.4, 524.6),
+        font_name="Helvetica",
+        font_size=14,
+        role="emphasis",
+    )
+    try:
+        item = TranslatedLine(
+            source=line,
+            translated_text="おめでとうございます！スリープブロッカーを取り外し、チャンネル番号を選択してください。",
+            output_font_size=14,
+        )
+        max_width = _max_width(page, item, font)
+    finally:
+        doc.close()
+
+    assert max_width <= 595 - 84.4 - 72
