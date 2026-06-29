@@ -142,46 +142,95 @@ class OpenAICompatibleTranslator(Translator):
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(self.models_url(base_url), headers=headers)
 
-        if response.status_code >= 400:
+        model = options.model or settings.default_model
+        sample_models: list[str] = []
+        model_found: bool | None = None
+        if response.status_code >= 400 and response.status_code not in {404, 405}:
             return ModelConnectionTestResult(
                 ok=False,
                 provider=options.provider,
                 normalized_base_url=normalized,
-                model=options.model,
+                model=model,
                 message=self._extract_error(response),
             )
 
+        if response.status_code < 400:
+            try:
+                body = response.json()
+            except ValueError:
+                return ModelConnectionTestResult(
+                    ok=False,
+                    provider=options.provider,
+                    normalized_base_url=normalized,
+                    model=model,
+                    message=self._extract_error(response),
+                )
+
+            raw_models = body.get("data", []) if isinstance(body, dict) else []
+            sample_models = [
+                str(item.get("id"))
+                for item in raw_models
+                if isinstance(item, dict) and item.get("id")
+            ][:12]
+            model_found = model in sample_models if model and sample_models else None
+            if model and sample_models and not model_found:
+                return ModelConnectionTestResult(
+                    ok=False,
+                    provider=options.provider,
+                    normalized_base_url=normalized,
+                    model=model,
+                    model_found=False,
+                    sample_models=sample_models,
+                    message=f"API /models is reachable, but model '{model}' was not found.",
+                )
+
+        probe_payload = {
+            "model": model,
+            "temperature": 0,
+            "messages": [{"role": "user", "content": "Reply with OK only."}],
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            probe_response = await client.post(self.completion_url(base_url), json=probe_payload, headers=headers)
+        if probe_response.status_code >= 400:
+            return ModelConnectionTestResult(
+                ok=False,
+                provider=options.provider,
+                normalized_base_url=normalized,
+                model=model,
+                model_found=model_found,
+                sample_models=sample_models,
+                message=self._extract_error(probe_response),
+            )
         try:
-            body = response.json()
+            probe_body = probe_response.json()
         except ValueError:
             return ModelConnectionTestResult(
                 ok=False,
                 provider=options.provider,
                 normalized_base_url=normalized,
-                model=options.model,
-                message=self._extract_error(response),
+                model=model,
+                model_found=model_found,
+                sample_models=sample_models,
+                message=self._extract_error(probe_response),
             )
-
-        raw_models = body.get("data", []) if isinstance(body, dict) else []
-        model_ids = [
-            str(item.get("id"))
-            for item in raw_models
-            if isinstance(item, dict) and item.get("id")
-        ]
-        model = options.model or settings.default_model
-        model_found = model in model_ids if model and model_ids else None
-        if model and model_ids and not model_found:
-            message = f"API is reachable, but model '{model}' was not found in /models."
-        else:
-            message = "API is reachable."
+        if not isinstance(probe_body, dict) or "choices" not in probe_body:
+            return ModelConnectionTestResult(
+                ok=False,
+                provider=options.provider,
+                normalized_base_url=normalized,
+                model=model,
+                model_found=model_found,
+                sample_models=sample_models,
+                message=f"Chat completion probe returned unexpected response: {probe_body}",
+            )
         return ModelConnectionTestResult(
-            ok=not (model and model_ids and not model_found),
+            ok=True,
             provider=options.provider,
             normalized_base_url=normalized,
             model=model,
             model_found=model_found,
-            sample_models=model_ids[:12],
-            message=message,
+            sample_models=sample_models,
+            message="OpenAI-compatible API is reachable and chat completion probe passed.",
         )
 
 

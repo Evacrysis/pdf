@@ -60,6 +60,7 @@ function App() {
     () => job?.pages.reduce((sum, page) => sum + page.failures.length, 0) ?? 0,
     [job],
   );
+  const requiresApiTest = provider !== "dry_run" && apiTest?.ok !== true;
 
   useEffect(() => {
     if (!job || job.status === "completed" || job.status === "failed") return;
@@ -72,10 +73,18 @@ function App() {
     return () => window.clearInterval(timer);
   }, [job]);
 
+  useEffect(() => {
+    setApiTest(null);
+  }, [provider, baseUrl, model, apiKey]);
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!file) {
       setError("请选择 PDF 文件。");
+      return;
+    }
+    if (requiresApiTest) {
+      setError("请先点击“测试 API”，并确认连接正常后再开始翻译。");
       return;
     }
     setBusy(true);
@@ -200,9 +209,9 @@ function App() {
             严格模式：硬门禁失败则任务失败
           </label>
 
-          <button disabled={busy} type="submit">
+          <button disabled={busy || requiresApiTest} type="submit">
             <FileText size={18} />
-            {busy ? "提交中" : "开始翻译"}
+            {busy ? "提交中" : requiresApiTest ? "先测试 API" : "开始翻译"}
           </button>
           {error && <p className="errorText">{error}</p>}
         </form>
