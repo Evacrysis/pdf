@@ -7,6 +7,22 @@ import fitz
 from app.models import TranslatedLine
 from app.services.line_processing import QUOTE_GAP_RE
 
+DIAGRAM_LABEL_SOURCES = {
+    "Knob: Adjust the opening percentage",
+    "Open",
+    "Close",
+    "Stop",
+    "Slight Open",
+    "Slight Close",
+    "Favorite Position",
+    "Control All Blinds (max 9 blinds)",
+    "1-9 Channel: One channel corresponds to one blind.",
+    "Set key P1",
+    "Set key P2",
+    "Tilt vanes",
+    "Adjust the overlap of stripes",
+}
+
 
 def _wrap_text(text: str, font: fitz.Font, font_size: float, max_width: float) -> list[str]:
     if "\n" in text:
@@ -57,6 +73,56 @@ def _redaction_rects(page: fitz.Page, item: TranslatedLine) -> list[fitz.Rect]:
     return [fitz.Rect(*item.source.bbox)]
 
 
+def _large_artwork_rects(page: fitz.Page) -> list[fitz.Rect]:
+    rects: list[fitz.Rect] = []
+    for drawing in page.get_drawings():
+        rect = drawing.get("rect")
+        if not rect:
+            continue
+        rect = fitz.Rect(rect)
+        if rect.width < 55 or rect.height < 55:
+            continue
+        aspect = rect.width / max(rect.height, 1)
+        if 0.55 <= aspect <= 1.85:
+            rects.append(rect)
+    return rects
+
+
+def _nearest_artwork_rect(page: fitz.Page, item: TranslatedLine) -> fitz.Rect | None:
+    source = " ".join(item.source.text.split())
+    if source not in DIAGRAM_LABEL_SOURCES:
+        return None
+    label = fitz.Rect(*item.source.bbox)
+    label_center = fitz.Point((label.x0 + label.x1) / 2, (label.y0 + label.y1) / 2)
+    candidates: list[tuple[float, fitz.Rect]] = []
+    for rect in _large_artwork_rects(page):
+        center = fitz.Point((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2)
+        dx = label_center.x - center.x
+        dy = label_center.y - center.y
+        distance = (dx * dx + dy * dy) ** 0.5
+        if distance <= 260:
+            candidates.append((distance, rect))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item_: item_[0])
+    return candidates[0][1]
+
+
+def _diagram_side(page: fitz.Page, item: TranslatedLine) -> tuple[fitz.Rect, str] | None:
+    artwork = _nearest_artwork_rect(page, item)
+    if artwork is None:
+        return None
+    label = fitz.Rect(*item.source.bbox)
+    label_center_x = (label.x0 + label.x1) / 2
+    artwork_center_x = (artwork.x0 + artwork.x1) / 2
+    vertically_aligned = label.y0 < artwork.y1 and label.y1 > artwork.y0
+    if vertically_aligned and label_center_x < artwork_center_x and label.x0 < artwork.x0:
+        return artwork, "left"
+    if vertically_aligned and label_center_x > artwork_center_x and label.x1 > artwork.x1:
+        return artwork, "right"
+    return None
+
+
 def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
     src = item.source
     x0, _, x1, _ = src.bbox
@@ -66,6 +132,15 @@ def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
         [font.text_length(line, fontsize=item.output_font_size) for line in item.translated_text.splitlines() if line]
         or [0]
     ) + 2
+    diagram_side = _diagram_side(page, item)
+    if diagram_side is not None:
+        artwork, side = diagram_side
+        safe_gap = max(14, item.output_font_size * 1.15)
+        if side == "left":
+            slot = max(4, artwork.x0 - safe_gap - 36)
+        else:
+            slot = max(4, page.rect.width - 36 - (artwork.x1 + safe_gap))
+        return min(desired, slot) if desired > 0 else slot
     if src.role in {"title", "section_title", "subsection_title", "emphasis"}:
         return max(original, available)
     if desired <= available:
@@ -75,6 +150,28 @@ def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
     if src.role == "figure_label":
         return max(original, min(available, original * 2.4))
     return original
+
+
+def _line_widths(wrapped: list[str], font: fitz.Font, font_size: float) -> list[float]:
+    return [font.text_length(line, fontsize=font_size) for line in wrapped]
+
+
+def _label_start_x(
+    page: fitz.Page,
+    item: TranslatedLine,
+    wrapped: list[str],
+    font: fitz.Font,
+) -> float:
+    label = fitz.Rect(*item.source.bbox)
+    diagram_side = _diagram_side(page, item)
+    if diagram_side is None:
+        return label.x0
+    artwork, side = diagram_side
+    label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
+    safe_gap = max(14, item.output_font_size * 1.15)
+    if side == "left":
+        return max(36, artwork.x0 - safe_gap - label_width)
+    return min(max(artwork.x1 + safe_gap, label.x0), page.rect.width - 36 - label_width)
 
 
 def _baseline(item: TranslatedLine) -> float:
@@ -180,16 +277,16 @@ def write_editable_pdf(
                         f"Protected source icons could not be located for quote-gap line on page {src.page_index + 1}."
                     )
                 continue
-            x0, y0, x1, y1 = src.bbox
             max_width = _max_width(page, item, font)
             wrapped = _wrap_text(item.translated_text, font, item.output_font_size, max_width)
             item.wrapped_lines = wrapped
             line_step = item.output_font_size * 1.35
             baseline = _baseline(item)
+            x = _label_start_x(page, item, wrapped, font)
             for offset, text in enumerate(wrapped):
                 _insert_text(
                     page,
-                    fitz.Point(x0, baseline + offset * line_step),
+                    fitz.Point(x, baseline + offset * line_step),
                     text,
                     font_name,
                     item.output_font_size,

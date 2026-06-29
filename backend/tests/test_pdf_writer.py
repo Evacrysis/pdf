@@ -4,7 +4,7 @@ import fitz
 import pytest
 
 from app.models import TextLine, TranslatedLine
-from app.services.pdf_writer import _wrap_text, write_editable_pdf
+from app.services.pdf_writer import _label_start_x, _max_width, _wrap_text, write_editable_pdf
 
 
 def _make_source_pdf(path: Path) -> None:
@@ -157,3 +157,52 @@ def test_wrap_text_keeps_short_labels_on_one_line() -> None:
 
     assert _wrap_text("キーP1を設定", font, 14, 90) == ["キーP1を設定"]
     assert _wrap_text("チルトベーン", font, 14, 90) == ["チルトベーン"]
+
+
+def test_diagram_labels_align_away_from_artwork_lines(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=420, height=260)
+    page.draw_circle(fitz.Point(220, 130), 55, color=(0, 0, 0))
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    page = doc[0]
+    font = fitz.Font(fontfile=str(font_path))
+    left = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Knob: Adjust the opening percentage",
+        bbox=(48, 118, 164, 138),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    right = TextLine(
+        page_index=0,
+        line_index=1,
+        text="1-9 Channel: One channel corresponds to one blind.",
+        bbox=(260, 118, 392, 138),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    try:
+        left_item = TranslatedLine(source=left, translated_text="つまみ：開き具合を調整", output_font_size=14)
+        right_item = TranslatedLine(source=right, translated_text="1～9チャンネル：", output_font_size=14)
+
+        left_wrapped = _wrap_text(left_item.translated_text, font, 14, _max_width(page, left_item, font))
+        right_wrapped = _wrap_text(right_item.translated_text, font, 14, _max_width(page, right_item, font))
+        left_x = _label_start_x(page, left_item, left_wrapped, font)
+        right_x = _label_start_x(page, right_item, right_wrapped, font)
+    finally:
+        doc.close()
+
+    assert left_x < left.bbox[0]
+    assert all(left_x + font.text_length(line, fontsize=14) <= 220 - 55 - 14 for line in left_wrapped)
+    assert right_x >= 220 + 55 + 14
