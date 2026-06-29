@@ -8,8 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.config import settings
-from app.models import TranslationOptions
+from app.models import ModelConnectionTestRequest, TranslationOptions
 from app.services.jobs import job_store
+from app.services.translator import get_translator
 
 app = FastAPI(title="PDF Translation Workbench", version="0.1.0")
 
@@ -44,6 +45,22 @@ async def rules() -> dict:
         ],
         "rules_file": "docs/rules/pairing_manual_workflow_rules.md",
     }
+
+
+@app.post("/api/model/test")
+async def test_model_connection(payload: ModelConnectionTestRequest) -> dict:
+    options = TranslationOptions(
+        provider=payload.provider,
+        base_url=payload.base_url,
+        model=payload.model,
+        api_key=payload.api_key,
+    )
+    translator = get_translator(payload.provider)
+    tester = getattr(translator, "test_connection", None)
+    if tester is None:
+        raise HTTPException(status_code=400, detail=f"Provider does not support connection tests: {payload.provider}")
+    result = await tester(options)
+    return result.model_dump(mode="json")
 
 
 @app.post("/api/jobs")

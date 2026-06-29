@@ -4,7 +4,7 @@
 
 ## 目标
 
-- 前端上传 PDF，选择源语言/目标语言，配置 OpenAI-compatible 模型。
+- 前端上传 PDF，选择源语言/目标语言，配置 OpenAI-compatible 或 Anthropic-compatible 模型。
 - 后端按页提取 PDF 文本、字号、位置和保护 token。
 - 译文输出为真实可编辑 PDF 文本层，不整页栅格化。
 - 严格执行规则：不缩放文字、不漏翻、不叠写、不裁切图片/线条、不重画保护符号。
@@ -53,6 +53,9 @@ docker compose up --build
 - `POST /api/jobs` 上传并启动翻译任务。
 - `GET /api/jobs/{job_id}` 查询任务状态和逐页 QA。
 - `GET /api/jobs/{job_id}/download` 下载生成 PDF。
+- `POST /api/model/test` 测试模型 API 连通性。
+  - OpenAI-compatible 自动兼容根地址、`/v1`、`/v1/models`、`/v1/chat/completions` 等 Base URL 写法。
+  - Anthropic-compatible 自动兼容根地址、`/v1`、`/v1/models`、`/v1/messages` 等 Base URL 写法。
 - `GET /api/rules` 查看内置规则摘要。
 
 ## 本地开发
@@ -81,4 +84,3 @@ npm run dev
 cd backend
 pytest
 ```
-

@@ -30,6 +30,23 @@ class TranslationOptions(BaseModel):
     strict_mode: bool = True
 
 
+class ModelConnectionTestRequest(BaseModel):
+    provider: str = "openai_compatible"
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    api_key: Optional[str] = Field(default=None, exclude=True)
+
+
+class ModelConnectionTestResult(BaseModel):
+    ok: bool
+    provider: str
+    normalized_base_url: Optional[str] = None
+    message: str
+    model: Optional[str] = None
+    model_found: Optional[bool] = None
+    sample_models: list[str] = Field(default_factory=list)
+
+
 class TextLine(BaseModel):
     page_index: int
     line_index: int

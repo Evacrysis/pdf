@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, CheckCircle2, Download, FileText, UploadCloud } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileText, PlugZap, UploadCloud } from "lucide-react";
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
@@ -31,6 +31,16 @@ type Job = {
   errors: string[];
 };
 
+type ApiTestResult = {
+  ok: boolean;
+  provider: string;
+  normalized_base_url?: string;
+  message: string;
+  model?: string;
+  model_found?: boolean;
+  sample_models: string[];
+};
+
 function App() {
   const [file, setFile] = useState<File | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState("en");
@@ -42,6 +52,8 @@ function App() {
   const [strictMode, setStrictMode] = useState(true);
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testBusy, setTestBusy] = useState(false);
+  const [apiTest, setApiTest] = useState<ApiTestResult | null>(null);
   const [error, setError] = useState("");
 
   const hardFailureCount = useMemo(
@@ -84,6 +96,28 @@ function App() {
       return;
     }
     setJob(await response.json());
+  }
+
+  async function testApiConnection() {
+    setTestBusy(true);
+    setApiTest(null);
+    setError("");
+    const response = await fetch(`${apiBase}/api/model/test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider,
+        base_url: baseUrl,
+        model,
+        api_key: apiKey,
+      }),
+    });
+    setTestBusy(false);
+    if (!response.ok) {
+      setError(await response.text());
+      return;
+    }
+    setApiTest(await response.json());
   }
 
   return (
@@ -130,6 +164,7 @@ function App() {
             模型提供方
             <select value={provider} onChange={(event) => setProvider(event.target.value)}>
               <option value="openai_compatible">OpenAI-compatible</option>
+              <option value="anthropic_compatible">Anthropic-compatible</option>
               <option value="dry_run">Dry run</option>
             </select>
           </label>
@@ -146,6 +181,20 @@ function App() {
             API Key
             <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
           </label>
+          <button className="secondaryButton" disabled={testBusy} type="button" onClick={testApiConnection}>
+            <PlugZap size={18} />
+            {testBusy ? "测试中" : "测试 API"}
+          </button>
+          {apiTest && (
+            <div className={apiTest.ok ? "apiTestResult ok" : "apiTestResult bad"}>
+              <strong>{apiTest.ok ? "连接正常" : "连接失败"}</strong>
+              <span>{apiTest.message}</span>
+              {apiTest.normalized_base_url && <span>规范化地址：{apiTest.normalized_base_url}</span>}
+              {apiTest.sample_models.length > 0 && (
+                <span>模型示例：{apiTest.sample_models.slice(0, 5).join("、")}</span>
+              )}
+            </div>
+          )}
           <label className="checkRow">
             <input type="checkbox" checked={strictMode} onChange={(event) => setStrictMode(event.target.checked)} />
             严格模式：硬门禁失败则任务失败
@@ -206,4 +255,3 @@ function App() {
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
-

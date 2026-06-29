@@ -134,9 +134,37 @@ button {
   margin-top: 18px;
 }
 
+.secondaryButton {
+  margin-top: 14px;
+  background: #eef4ff;
+  color: #1f4f99;
+  border: 1px solid #b9cdf8;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+
+.apiTestResult {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.apiTestResult.ok {
+  color: #087443;
+  background: #ecfdf3;
+}
+
+.apiTestResult.bad {
+  color: #b42318;
+  background: #fef3f2;
 }
 
 .reportPanel {
@@ -228,4 +256,3 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
-
