@@ -4,7 +4,7 @@ import fitz
 import pytest
 
 from app.models import TextLine, TranslatedLine
-from app.services.pdf_writer import _baseline, _label_start_x, _max_width, _redaction_rects, _wrap_text, write_editable_pdf
+from app.services.pdf_writer import _baseline, _label_start_x, _layout_text, _max_width, _redaction_rects, _wrap_text, write_editable_pdf
 
 
 def _make_source_pdf(path: Path) -> None:
@@ -307,6 +307,56 @@ def test_lower_right_diagram_label_stays_right_aligned(tmp_path) -> None:
         doc.close()
 
     assert x >= 220 + 55 + 14
+
+
+def test_right_side_diagram_label_keeps_source_gap_from_artwork(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=520, height=260)
+    page.draw_circle(fitz.Point(220, 130), 55, color=(0, 0, 0))
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    page = doc[0]
+    font = fitz.Font(fontfile=str(font_path))
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Slight Close",
+        bbox=(330, 118, 410, 138),
+        origin=(330, 133),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    try:
+        item = TranslatedLine(source=line, translated_text="微閉", output_font_size=14)
+        wrapped = _wrap_text(item.translated_text, font, 14, _max_width(page, item, font))
+        x = _label_start_x(page, item, wrapped, font)
+    finally:
+        doc.close()
+
+    assert x == 330
+
+
+def test_layout_text_removes_model_or_fixed_hard_breaks_for_normal_text() -> None:
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Congratulations! Remove the sleeping blocker.",
+        bbox=(84.4, 509.1, 558.8, 561.1),
+        font_name="Helvetica",
+        font_size=14,
+        role="emphasis",
+    )
+    item = TranslatedLine(source=line, translated_text="おめでとうございます！\nスリープブロッカーを外します。", output_font_size=14)
+
+    assert _layout_text(item) == "おめでとうございます！ スリープブロッカーを外します。"
 
 
 def test_wide_emphasis_paragraph_keeps_right_safety_margin(tmp_path) -> None:

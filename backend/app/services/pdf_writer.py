@@ -46,6 +46,12 @@ def _wrap_text(text: str, font: fitz.Font, font_size: float, max_width: float) -
     return parts
 
 
+def _layout_text(item: TranslatedLine) -> str:
+    if _is_quote_gap_line(item.source.text):
+        return item.translated_text
+    return " ".join(part.strip() for part in item.translated_text.splitlines() if part.strip())
+
+
 def _is_quote_gap_line(text: str) -> bool:
     return bool(QUOTE_GAP_RE.match(" ".join(text.split())))
 
@@ -200,7 +206,7 @@ def _label_start_x(
     if side == "left":
         return max(36, artwork.x0 - safe_gap - label_width)
     target = artwork.x1 + safe_gap
-    return min(target, page.rect.width - 36 - label_width)
+    return min(max(target, source_x), page.rect.width - 36 - label_width)
 
 
 def _baseline(item: TranslatedLine) -> float:
@@ -308,8 +314,9 @@ def write_editable_pdf(
                         f"Protected source icons could not be located for quote-gap line on page {src.page_index + 1}."
                     )
                 continue
+            layout_text = _layout_text(item)
             max_width = _max_width(page, item, font)
-            wrapped = _wrap_text(item.translated_text, font, item.output_font_size, max_width)
+            wrapped = _wrap_text(layout_text, font, item.output_font_size, max_width)
             item.wrapped_lines = wrapped
             line_step = item.output_font_size * 1.35
             baseline = _baseline(item)

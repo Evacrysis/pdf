@@ -41,7 +41,7 @@ def test_merges_1_9_channel_semantic_pair() -> None:
     assert len(merged) == 1
     assert merged[0].text == "1-9 Channel: One channel corresponds to one blind."
     assert merged[0].bbox == (10, 10, 120, 40)
-    assert fixed_translation_for(merged[0]) == "1～9チャンネル：\n1チャンネルに1台の\nシェードを登録できます。"
+    assert fixed_translation_for(merged[0]) == "1～9チャンネル：1チャンネルに1台のシェードを登録できます。"
 
 
 def test_fixed_control_all_blinds_translation_is_compact() -> None:
@@ -53,7 +53,7 @@ def test_fixed_control_all_blinds_translation_is_compact() -> None:
     merged = merge_known_semantic_lines(lines)
 
     assert len(merged) == 1
-    assert fixed_translation_for(merged[0]) == "全シェード制御\n（最大9台）"
+    assert fixed_translation_for(merged[0]) == "全シェード制御（最大9台）"
 
 
 def test_merges_example_operation_paragraph() -> None:
@@ -67,7 +67,7 @@ def test_merges_example_operation_paragraph() -> None:
 
     assert len(merged) == 1
     assert fixed_translation_for(merged[0]) == (
-        "シェードが9台あり、そのうち1・3・5を同時に開ける場合は、\n"
+        "シェードが9台あり、そのうち1・3・5を同時に開ける場合は、"
         "「1」→「3」→「5」の順に押し、その後「開」を押します。"
     )
 
@@ -84,3 +84,4 @@ def test_continuation_warning_lines_merge_into_one_semantic_block() -> None:
     assert len(merged) == 1
     assert "refer to page 9-17" in merged[0].text
     assert fixed_translation_for(merged[0]) is not None
+    assert "\n" not in fixed_translation_for(merged[0])

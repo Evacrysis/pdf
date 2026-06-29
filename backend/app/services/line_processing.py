@@ -117,7 +117,7 @@ FIXED_TRANSLATIONS = {
     "Remote Control": "リモコン",
     "Features": "特徴",
     "Setup Guide": "設定ガイド",
-    "Control All Blinds (max 9 blinds)": "全シェード制御\n（最大9台）",
+    "Control All Blinds (max 9 blinds)": "全シェード制御（最大9台）",
     "Knob: Adjust the opening percentage": "つまみ：開き具合を調整",
     "Open": "開",
     "Close": "閉",
@@ -125,9 +125,9 @@ FIXED_TRANSLATIONS = {
     "Slight Open": "微開",
     "Slight Close": "微閉",
     "Favorite Position": "お気に入り位置",
-    "1-9 Channel: One channel corresponds to one blind.": "1～9チャンネル：\n1チャンネルに1台の\nシェードを登録できます。",
+    "1-9 Channel: One channel corresponds to one blind.": "1～9チャンネル：1チャンネルに1台のシェードを登録できます。",
     "Example Operation:": "操作例：",
-    "If there are 9 blinds, and you want to open blinds 1, 3, and 5 together, the operation method is: Press 1, 3, and 5 in sequence, and then press \" Open \".": "シェードが9台あり、そのうち1・3・5を同時に開ける場合は、\n「1」→「3」→「5」の順に押し、その後「開」を押します。",
+    "If there are 9 blinds, and you want to open blinds 1, 3, and 5 together, the operation method is: Press 1, 3, and 5 in sequence, and then press \" Open \".": "シェードが9台あり、そのうち1・3・5を同時に開ける場合は、「1」→「3」→「5」の順に押し、その後「開」を押します。",
     "Set key P1": "キーP1を設定",
     "Set key P2": "キーP2を設定",
     "• For Shangri-la Shades": "・シャングリラシェードの場合",
@@ -135,7 +135,7 @@ FIXED_TRANSLATIONS = {
     "Only when Shangri-la Shades reach the bottom limit can slats be adjusted.": "シャングリラシェードが下限に達したときのみ、スラットを調整できます。",
     "Tilt vanes": "チルトベーン",
     "Adjust the overlap of stripes": "縞模様の重なりを調整する",
-    "Congratulations! Remove the sleeping blocker, chooes the channel number (attached to the bottom rod ) to control the shade. If it cannot work, please refer to page 9-17.": "おめでとうございます！スリープブロッカーを取り外し、\n（下部ロッドに取り付けた）チャンネル番号を選択してシェードを操作してください。\n動作しない場合は、9～17ページを参照してください。",
+    "Congratulations! Remove the sleeping blocker, chooes the channel number (attached to the bottom rod ) to control the shade. If it cannot work, please refer to page 9-17.": "おめでとうございます！スリープブロッカーを外し、チャンネル番号（下部ロッド取付）を選択してシェードを操作してください。動作しない場合は9～17ページを参照してください。",
 }
 
 
