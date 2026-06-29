@@ -10,13 +10,20 @@ type StoredModelConfig = {
   provider: string;
   baseUrl: string;
   model: string;
+  apiKey: string;
+  testedFingerprint?: string;
 };
 
 const defaultModelConfig: StoredModelConfig = {
   provider: "openai_compatible",
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4.1-mini",
+  apiKey: "",
 };
+
+function modelFingerprint(provider: string, baseUrl: string, model: string, apiKey: string): string {
+  return JSON.stringify({ provider, baseUrl, model, apiKey });
+}
 
 function readStoredModelConfig(): StoredModelConfig {
   try {
@@ -92,12 +99,14 @@ function App() {
   const [provider, setProvider] = useState(storedModelConfig.provider);
   const [baseUrl, setBaseUrl] = useState(storedModelConfig.baseUrl);
   const [model, setModel] = useState(storedModelConfig.model);
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(storedModelConfig.apiKey);
   const [draftProvider, setDraftProvider] = useState(storedModelConfig.provider);
   const [draftBaseUrl, setDraftBaseUrl] = useState(storedModelConfig.baseUrl);
   const [draftModel, setDraftModel] = useState(storedModelConfig.model);
-  const [draftApiKey, setDraftApiKey] = useState("");
+  const [draftApiKey, setDraftApiKey] = useState(storedModelConfig.apiKey);
   const [modelConfigOpen, setModelConfigOpen] = useState(false);
+  const [testedFingerprint, setTestedFingerprint] = useState(storedModelConfig.testedFingerprint ?? "");
+  const [draftTestedFingerprint, setDraftTestedFingerprint] = useState(storedModelConfig.testedFingerprint ?? "");
   const [strictMode, setStrictMode] = useState(true);
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
@@ -112,7 +121,9 @@ function App() {
     () => job?.pages.reduce((sum, page) => sum + page.failures.length, 0) ?? 0,
     [job],
   );
-  const requiresApiTest = provider !== "dry_run" && apiTest?.ok !== true;
+  const activeFingerprint = modelFingerprint(provider, baseUrl, model, apiKey);
+  const draftFingerprint = modelFingerprint(draftProvider, draftBaseUrl, draftModel, draftApiKey);
+  const requiresApiTest = provider !== "dry_run" && testedFingerprint !== activeFingerprint;
   const progressPercent = Math.round(Math.max(0, Math.min(1, job?.progress ?? 0)) * 100);
   const canPreview = Boolean(job?.id && job?.output_path && (job?.total_pages ?? 0) > 0);
   const previewPages = useMemo(
@@ -136,12 +147,14 @@ function App() {
     setDraftBaseUrl(baseUrl);
     setDraftModel(model);
     setDraftApiKey(apiKey);
+    setDraftTestedFingerprint(testedFingerprint);
     setModelConfigOpen(true);
   }
 
   function updateDraft(updater: () => void) {
     updater();
     setApiTest(null);
+    setDraftTestedFingerprint("");
   }
 
   function saveModelConfig() {
@@ -149,9 +162,17 @@ function App() {
     setBaseUrl(draftBaseUrl);
     setModel(draftModel);
     setApiKey(draftApiKey);
+    const savedTestedFingerprint = draftTestedFingerprint === draftFingerprint ? draftTestedFingerprint : "";
+    setTestedFingerprint(savedTestedFingerprint);
     window.localStorage.setItem(
       modelConfigStorageKey,
-      JSON.stringify({ provider: draftProvider, baseUrl: draftBaseUrl, model: draftModel }),
+      JSON.stringify({
+        provider: draftProvider,
+        baseUrl: draftBaseUrl,
+        model: draftModel,
+        apiKey: draftApiKey,
+        testedFingerprint: savedTestedFingerprint,
+      }),
     );
     setModelConfigOpen(false);
   }
@@ -217,7 +238,11 @@ function App() {
       setError(await response.text());
       return;
     }
-    setApiTest(await response.json());
+    const result = await response.json();
+    setApiTest(result);
+    if (result.ok) {
+      setDraftTestedFingerprint(draftFingerprint);
+    }
   }
 
   function syncPreviewScroll(source: "source" | "translated") {
