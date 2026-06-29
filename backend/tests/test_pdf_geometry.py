@@ -1,5 +1,9 @@
 from app.models import TextLine
-from app.services.pdf_geometry import PROTECTED_TOKEN_RE, _classify_roles, _is_localizable
+from pathlib import Path
+
+import fitz
+
+from app.services.pdf_geometry import PROTECTED_TOKEN_RE, _classify_roles, _is_localizable, extract_text_lines
 
 
 def test_protected_tokens_do_not_match_inside_words() -> None:
@@ -50,3 +54,16 @@ def test_battery_artwork_text_is_not_localizable() -> None:
     assert not _is_localizable("Lithium Cell")
     assert not _is_localizable("CR2450")
     assert not _is_localizable("3V")
+
+
+def test_extract_text_lines_preserves_span_origin(tmp_path: Path) -> None:
+    source = tmp_path / "origin.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=220, height=120)
+    page.insert_text(fitz.Point(24, 64), "Remote Control", fontsize=14)
+    doc.save(source)
+    doc.close()
+
+    lines = extract_text_lines(str(source))
+
+    assert lines[0].origin == (24.0, 64.0)

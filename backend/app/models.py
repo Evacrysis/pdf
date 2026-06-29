@@ -54,6 +54,7 @@ class TextLine(BaseModel):
     line_index: int
     text: str
     bbox: tuple[float, float, float, float]
+    origin: Optional[tuple[float, float]] = None
     font_name: str
     font_size: float
     role: str = "body"

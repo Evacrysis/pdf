@@ -72,6 +72,7 @@ def extract_text_lines(pdf_path: str) -> list[TextLine]:
                     continue
                 span = _dominant_span(raw_line)
                 bbox = tuple(float(v) for v in raw_line.get("bbox", (0, 0, 0, 0)))
+                origin = span.get("origin")
                 tokens = [token for token in PROTECTED_TOKEN_RE.findall(text) if token.strip()]
                 page_lines.append(
                     TextLine(
@@ -79,6 +80,7 @@ def extract_text_lines(pdf_path: str) -> list[TextLine]:
                         line_index=len(page_lines),
                         text=text,
                         bbox=bbox,
+                        origin=tuple(float(v) for v in origin) if origin else None,
                         font_name=str(span.get("font", "")),
                         font_size=float(span.get("size", 0)),
                         protected_tokens=tokens,

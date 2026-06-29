@@ -4,7 +4,7 @@ import fitz
 import pytest
 
 from app.models import TextLine, TranslatedLine
-from app.services.pdf_writer import _label_start_x, _max_width, _redaction_rects, _wrap_text, write_editable_pdf
+from app.services.pdf_writer import _baseline, _label_start_x, _max_width, _redaction_rects, _wrap_text, write_editable_pdf
 
 
 def _make_source_pdf(path: Path) -> None:
@@ -94,6 +94,21 @@ def test_write_editable_pdf_rejects_cff_otf_font(tmp_path) -> None:
             [TranslatedLine(source=line, translated_text="リモコン", output_font_size=14)],
             font_path,
         )
+
+
+def test_baseline_prefers_source_origin() -> None:
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Features",
+        bbox=(50, 82, 150, 116),
+        origin=(50, 108.7),
+        font_name="Helvetica",
+        font_size=24,
+        role="section_title",
+    )
+
+    assert _baseline(TranslatedLine(source=line, translated_text="特徴", output_font_size=24)) == 108.7
 
 
 def test_write_editable_pdf_keeps_source_icons_for_quote_gap(tmp_path) -> None:

@@ -183,11 +183,12 @@ def _label_start_x(
     font: fitz.Font,
 ) -> float:
     label = fitz.Rect(*item.source.bbox)
+    source_x = item.source.origin[0] if item.source.origin else label.x0
     diagram_side = _diagram_side(page, item)
     if diagram_side is None:
         below_artwork = _diagram_below(page, item)
         if below_artwork is None:
-            return label.x0
+            return source_x
         label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
         artwork_center = (below_artwork.x0 + below_artwork.x1) / 2
         return min(max(36, artwork_center - label_width / 2), page.rect.width - 36 - label_width)
@@ -195,12 +196,16 @@ def _label_start_x(
     label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
     safe_gap = max(14, item.output_font_size * 1.15)
     if side == "left":
-        return max(36, artwork.x0 - safe_gap - label_width)
-    return min(max(artwork.x1 + safe_gap, label.x0), page.rect.width - 36 - label_width)
+        target = artwork.x0 - safe_gap - label_width
+        return max(36, min(source_x, target))
+    target = artwork.x1 + safe_gap
+    return min(max(target, source_x), page.rect.width - 36 - label_width)
 
 
 def _baseline(item: TranslatedLine) -> float:
     src = item.source
+    if src.origin:
+        return src.origin[1]
     x0, y0, x1, y1 = src.bbox
     if src.role in {"title", "section_title", "subsection_title"}:
         return y0 + src.font_size * 1.08
