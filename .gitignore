@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+storage/
+backend/storage/
+frontend/dist/
+fonts/*.otf
+fonts/*.ttf
+!fonts/.gitkeep
+

@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-4.1-mini}
+      DEFAULT_TARGET_LANGUAGE: ${DEFAULT_TARGET_LANGUAGE:-ja}
+      PDF_FONT_PATH: ${PDF_FONT_PATH:-/app/fonts/SourceHanSansJP-Regular.otf}
+      STRICT_MODE: ${STRICT_MODE:-true}
+      STORAGE_DIR: /app/storage
+    volumes:
+      - ./storage:/app/storage
+      - ./fonts:/app/fonts:ro
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend

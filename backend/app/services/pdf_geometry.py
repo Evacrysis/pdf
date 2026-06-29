@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import re
+from statistics import median
+
+import fitz
+
+from app.models import TextLine
+
+
+PROTECTED_TOKEN_RE = re.compile(
+    r"(?:(?:CH|P)\+?|CH-|P[12]|OK|A\d+|\d{2}|GC|EC|on|[124]x|\"[^\"]*\"|'[^']*')"
+)
+
+
+def _line_text(line: dict) -> str:
+    return "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+
+
+def _dominant_span(line: dict) -> dict:
+    spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
+    if not spans:
+        return {"font": "", "size": 0}
+    return max(spans, key=lambda span: len(span.get("text", "")))
+
+
+def _is_localizable(text: str) -> bool:
+    if not text:
+        return False
+    if re.fullmatch(r"[\W\d_]+", text):
+        return False
+    if re.fullmatch(r"(?:[124]x|CH\+|CH-|P[12]|OK|A\d+|\d{2}|GC|EC|on)", text):
+        return False
+    return bool(re.search(r"[A-Za-z]", text))
+
+
+def _classify_roles(lines: list[TextLine]) -> None:
+    sizes = [line.font_size for line in lines if line.localizable and line.font_size > 0]
+    if not sizes:
+        return
+    body_size = median(sizes)
+    for line in lines:
+        if line.font_size >= body_size + 4:
+            line.role = "title"
+        elif line.font_size >= body_size + 1.5:
+            line.role = "section_title"
+        elif line.font_size <= body_size - 2:
+            line.role = "figure_label"
+        else:
+            line.role = "body"
+
+
+def extract_text_lines(pdf_path: str) -> list[TextLine]:
+    doc = fitz.open(pdf_path)
+    result: list[TextLine] = []
+    for page_index, page in enumerate(doc):
+        raw = page.get_text("dict")
+        page_lines: list[TextLine] = []
+        for block in raw.get("blocks", []):
+            if block.get("type") != 0:
+                continue
+            for raw_line in block.get("lines", []):
+                text = _line_text(raw_line)
+                if not text:
+                    continue
+                span = _dominant_span(raw_line)
+                bbox = tuple(float(v) for v in raw_line.get("bbox", (0, 0, 0, 0)))
+                tokens = [token for token in PROTECTED_TOKEN_RE.findall(text) if token.strip()]
+                page_lines.append(
+                    TextLine(
+                        page_index=page_index,
+                        line_index=len(page_lines),
+                        text=text,
+                        bbox=bbox,
+                        font_name=str(span.get("font", "")),
+                        font_size=float(span.get("size", 0)),
+                        protected_tokens=tokens,
+                        localizable=_is_localizable(text),
+                    )
+                )
+        _classify_roles(page_lines)
+        result.extend(page_lines)
+    doc.close()
+    return result
