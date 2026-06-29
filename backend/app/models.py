@@ -92,5 +92,11 @@ class JobRecord(BaseModel):
     source_path: Path
     output_path: Optional[Path] = None
     report_path: Optional[Path] = None
+    stage: str = "queued"
+    progress: float = 0
+    total_pages: int = 0
+    processed_pages: int = 0
+    total_lines: int = 0
+    processed_lines: int = 0
     pages: list[PageReport] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)

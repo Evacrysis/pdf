@@ -1,9 +1,43 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AlertTriangle, CheckCircle2, Download, FileText, PlugZap, UploadCloud } from "lucide-react";
 import "./styles.css";
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const modelConfigStorageKey = "pdf-translation-model-config";
+
+type StoredModelConfig = {
+  provider: string;
+  baseUrl: string;
+  model: string;
+};
+
+const defaultModelConfig: StoredModelConfig = {
+  provider: "openai_compatible",
+  baseUrl: "https://api.openai.com/v1",
+  model: "gpt-4.1-mini",
+};
+
+function readStoredModelConfig(): StoredModelConfig {
+  try {
+    const raw = window.localStorage.getItem(modelConfigStorageKey);
+    if (!raw) return defaultModelConfig;
+    return { ...defaultModelConfig, ...JSON.parse(raw) };
+  } catch {
+    return defaultModelConfig;
+  }
+}
+
+const stageLabels: Record<string, string> = {
+  queued: "排队中",
+  extracting: "解析原文",
+  translating: "翻译中",
+  writing_pdf: "生成 PDF",
+  qa: "规则校验",
+  completed: "已完成",
+  qa_failed: "校验失败",
+  failed: "失败",
+};
 
 type Gate = {
   code: string;
@@ -27,6 +61,13 @@ type Job = {
   id: string;
   status: "queued" | "running" | "completed" | "failed";
   source_filename: string;
+  output_path?: string | null;
+  stage: string;
+  progress: number;
+  total_pages: number;
+  processed_pages: number;
+  total_lines: number;
+  processed_lines: number;
   pages: PageReport[];
   errors: string[];
 };
@@ -42,25 +83,40 @@ type ApiTestResult = {
 };
 
 function App() {
+  const storedModelConfig = useMemo(() => readStoredModelConfig(), []);
   const [file, setFile] = useState<File | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState("en");
   const [targetLanguage, setTargetLanguage] = useState("ja");
-  const [provider, setProvider] = useState("openai_compatible");
-  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
-  const [model, setModel] = useState("gpt-4.1-mini");
+  const [provider, setProvider] = useState(storedModelConfig.provider);
+  const [baseUrl, setBaseUrl] = useState(storedModelConfig.baseUrl);
+  const [model, setModel] = useState(storedModelConfig.model);
   const [apiKey, setApiKey] = useState("");
+  const [draftProvider, setDraftProvider] = useState(storedModelConfig.provider);
+  const [draftBaseUrl, setDraftBaseUrl] = useState(storedModelConfig.baseUrl);
+  const [draftModel, setDraftModel] = useState(storedModelConfig.model);
+  const [draftApiKey, setDraftApiKey] = useState("");
+  const [modelConfigOpen, setModelConfigOpen] = useState(false);
   const [strictMode, setStrictMode] = useState(true);
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
   const [testBusy, setTestBusy] = useState(false);
   const [apiTest, setApiTest] = useState<ApiTestResult | null>(null);
   const [error, setError] = useState("");
+  const sourcePreviewRef = useRef<HTMLDivElement | null>(null);
+  const translatedPreviewRef = useRef<HTMLDivElement | null>(null);
+  const syncingPreviewRef = useRef(false);
 
   const hardFailureCount = useMemo(
     () => job?.pages.reduce((sum, page) => sum + page.failures.length, 0) ?? 0,
     [job],
   );
   const requiresApiTest = provider !== "dry_run" && apiTest?.ok !== true;
+  const progressPercent = Math.round(Math.max(0, Math.min(1, job?.progress ?? 0)) * 100);
+  const canPreview = Boolean(job?.id && job?.output_path && (job?.total_pages ?? 0) > 0);
+  const previewPages = useMemo(
+    () => Array.from({ length: job?.total_pages ?? 0 }, (_, index) => index),
+    [job?.total_pages],
+  );
 
   useEffect(() => {
     if (!job || job.status === "completed" || job.status === "failed") return;
@@ -73,9 +129,30 @@ function App() {
     return () => window.clearInterval(timer);
   }, [job]);
 
-  useEffect(() => {
+  function openModelConfig() {
+    setDraftProvider(provider);
+    setDraftBaseUrl(baseUrl);
+    setDraftModel(model);
+    setDraftApiKey(apiKey);
+    setModelConfigOpen(true);
+  }
+
+  function updateDraft(updater: () => void) {
+    updater();
     setApiTest(null);
-  }, [provider, baseUrl, model, apiKey]);
+  }
+
+  function saveModelConfig() {
+    setProvider(draftProvider);
+    setBaseUrl(draftBaseUrl);
+    setModel(draftModel);
+    setApiKey(draftApiKey);
+    window.localStorage.setItem(
+      modelConfigStorageKey,
+      JSON.stringify({ provider: draftProvider, baseUrl: draftBaseUrl, model: draftModel }),
+    );
+    setModelConfigOpen(false);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -115,10 +192,10 @@ function App() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        provider,
-        base_url: baseUrl,
-        model,
-        api_key: apiKey,
+        provider: draftProvider,
+        base_url: draftBaseUrl,
+        model: draftModel,
+        api_key: draftApiKey,
       }),
     });
     setTestBusy(false);
@@ -127,6 +204,19 @@ function App() {
       return;
     }
     setApiTest(await response.json());
+  }
+
+  function syncPreviewScroll(source: "source" | "translated") {
+    if (syncingPreviewRef.current) return;
+    const from = source === "source" ? sourcePreviewRef.current : translatedPreviewRef.current;
+    const to = source === "source" ? translatedPreviewRef.current : sourcePreviewRef.current;
+    if (!from || !to) return;
+    syncingPreviewRef.current = true;
+    to.scrollTop = from.scrollTop;
+    to.scrollLeft = from.scrollLeft;
+    window.requestAnimationFrame(() => {
+      syncingPreviewRef.current = false;
+    });
   }
 
   return (
@@ -169,31 +259,17 @@ function App() {
             </label>
           </div>
 
-          <label>
-            模型提供方
-            <select value={provider} onChange={(event) => setProvider(event.target.value)}>
-              <option value="openai_compatible">OpenAI-compatible</option>
-              <option value="anthropic_compatible">Anthropic-compatible</option>
-              <option value="dry_run">Dry run</option>
-            </select>
-          </label>
-
-          <label>
-            Base URL
-            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
-          </label>
-          <label>
-            模型
-            <input value={model} onChange={(event) => setModel(event.target.value)} />
-          </label>
-          <label>
-            API Key
-            <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
-          </label>
-          <button className="secondaryButton" disabled={testBusy} type="button" onClick={testApiConnection}>
-            <PlugZap size={18} />
-            {testBusy ? "测试中" : "测试 API"}
-          </button>
+          <div className="modelConfigSummary">
+            <div>
+              <span>模型配置</span>
+              <strong>{provider === "dry_run" ? "Dry run" : model}</strong>
+              <small>{provider === "dry_run" ? "本地模拟翻译" : `${provider} / ${baseUrl}`}</small>
+            </div>
+            <button className="secondaryButton" type="button" onClick={openModelConfig}>
+              <PlugZap size={18} />
+              配置模型
+            </button>
+          </div>
           {apiTest && (
             <div className={apiTest.ok ? "apiTestResult ok" : "apiTestResult bad"}>
               <strong>{apiTest.ok ? "连接正常" : "连接失败"}</strong>
@@ -237,6 +313,22 @@ function App() {
             </div>
           )}
 
+          {job && (
+            <div className="progressBlock">
+              <div className="progressMeta">
+                <span>{stageLabels[job.stage] ?? job.stage}</span>
+                <span>{progressPercent}%</span>
+              </div>
+              <div className="progressTrack" aria-label="翻译进度">
+                <div className="progressFill" style={{ width: `${progressPercent}%` }} />
+              </div>
+              <p>
+                已处理 {job.processed_lines}/{job.total_lines || 0} 行，
+                {job.processed_pages}/{job.total_pages || 0} 页
+              </p>
+            </div>
+          )}
+
           {job?.errors?.map((item) => (
             <p className="errorText" key={item}>{item}</p>
           ))}
@@ -257,8 +349,125 @@ function App() {
               </article>
             ))}
           </div>
+
+          {canPreview && (
+            <section className="previewSection">
+              <div className="previewTitle">
+                <h2>原文 / 译文同步预览</h2>
+                <p>左右拖动条同步，按最终生成 PDF 渲染。</p>
+              </div>
+              <div className="previewGrid">
+                <div className="previewPane">
+                  <div className="previewPaneHeader">原文</div>
+                  <div
+                    className="previewScroller"
+                    ref={sourcePreviewRef}
+                    onScroll={() => syncPreviewScroll("source")}
+                  >
+                    {previewPages.map((pageIndex) => (
+                      <figure className="previewPage" key={`source-${pageIndex}`}>
+                        <figcaption>第 {pageIndex + 1} 页</figcaption>
+                        <img
+                          src={`${apiBase}/api/jobs/${job!.id}/preview/source/${pageIndex}`}
+                          alt={`原文第 ${pageIndex + 1} 页`}
+                          loading="lazy"
+                        />
+                      </figure>
+                    ))}
+                  </div>
+                </div>
+                <div className="previewPane">
+                  <div className="previewPaneHeader">译文</div>
+                  <div
+                    className="previewScroller"
+                    ref={translatedPreviewRef}
+                    onScroll={() => syncPreviewScroll("translated")}
+                  >
+                    {previewPages.map((pageIndex) => (
+                      <figure className="previewPage" key={`translated-${pageIndex}`}>
+                        <figcaption>第 {pageIndex + 1} 页</figcaption>
+                        <img
+                          src={`${apiBase}/api/jobs/${job!.id}/preview/translated/${pageIndex}`}
+                          alt={`译文第 ${pageIndex + 1} 页`}
+                          loading="lazy"
+                        />
+                      </figure>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
         </section>
       </section>
+
+      {modelConfigOpen && (
+        <div className="modalBackdrop" role="presentation">
+          <section className="modalPanel" role="dialog" aria-modal="true" aria-labelledby="model-config-title">
+            <div className="modalHeader">
+              <h2 id="model-config-title">模型配置</h2>
+              <button className="iconButton" type="button" onClick={() => setModelConfigOpen(false)}>
+                关闭
+              </button>
+            </div>
+
+            <label>
+              模型提供方
+              <select
+                value={draftProvider}
+                onChange={(event) => updateDraft(() => setDraftProvider(event.target.value))}
+              >
+                <option value="openai_compatible">OpenAI-compatible</option>
+                <option value="anthropic_compatible">Anthropic-compatible</option>
+                <option value="dry_run">Dry run</option>
+              </select>
+            </label>
+
+            <label>
+              Base URL
+              <input value={draftBaseUrl} onChange={(event) => updateDraft(() => setDraftBaseUrl(event.target.value))} />
+            </label>
+            <label>
+              模型
+              <input value={draftModel} onChange={(event) => updateDraft(() => setDraftModel(event.target.value))} />
+            </label>
+            <label>
+              API Key
+              <input
+                type="password"
+                value={draftApiKey}
+                onChange={(event) => updateDraft(() => setDraftApiKey(event.target.value))}
+              />
+            </label>
+
+            {apiTest && (
+              <div className={apiTest.ok ? "apiTestResult ok" : "apiTestResult bad"}>
+                <strong>{apiTest.ok ? "连接正常" : "连接失败"}</strong>
+                <span>{apiTest.message}</span>
+                {apiTest.normalized_base_url && <span>规范化地址：{apiTest.normalized_base_url}</span>}
+                {apiTest.sample_models.length > 0 && (
+                  <span>模型示例：{apiTest.sample_models.slice(0, 5).join("、")}</span>
+                )}
+              </div>
+            )}
+
+            <div className="modalActions">
+              <button
+                className="secondaryButton"
+                disabled={testBusy || draftProvider === "dry_run"}
+                type="button"
+                onClick={testApiConnection}
+              >
+                <PlugZap size={18} />
+                {testBusy ? "测试中" : "测试 API"}
+              </button>
+              <button type="button" onClick={saveModelConfig}>
+                保存配置
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

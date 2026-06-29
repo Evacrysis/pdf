@@ -141,6 +141,42 @@ button {
   border: 1px solid #b9cdf8;
 }
 
+.modelConfigSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.modelConfigSummary > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.modelConfigSummary span,
+.modelConfigSummary small {
+  color: #5e6a7d;
+  font-size: 12px;
+}
+
+.modelConfigSummary strong {
+  color: #1d2433;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.modelConfigSummary .secondaryButton {
+  width: auto;
+  min-width: 118px;
+  margin-top: 0;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: wait;
@@ -199,6 +235,40 @@ button:disabled {
   background: #fef3f2;
 }
 
+.progressBlock {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.progressBlock p {
+  color: #5e6a7d;
+  font-size: 13px;
+}
+
+.progressMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.progressTrack {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8edf3;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: #1f6feb;
+  transition: width 180ms ease;
+}
+
 .pageList {
   display: grid;
   gap: 10px;
@@ -245,6 +315,137 @@ button:disabled {
   line-height: 1.45;
 }
 
+.previewSection {
+  margin-top: 18px;
+  border-top: 1px solid #e5eaf0;
+  padding-top: 18px;
+}
+
+.previewTitle {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.previewTitle h2 {
+  margin-bottom: 0;
+}
+
+.previewTitle p {
+  color: #5e6a7d;
+  font-size: 13px;
+}
+
+.previewGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 560px;
+}
+
+.previewPane {
+  min-width: 0;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.previewPaneHeader {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid #d9e1ec;
+  background: #fff;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.previewScroller {
+  height: 620px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.previewPage {
+  margin: 0 0 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.previewPage figcaption {
+  color: #5e6a7d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.previewPage img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid #d6dee9;
+  background: #fff;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(16, 24, 40, 0.42);
+}
+
+.modalPanel {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  padding: 18px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.22);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.modalHeader h2 {
+  margin-bottom: 0;
+}
+
+.iconButton {
+  width: auto;
+  height: 34px;
+  margin-top: 0;
+  padding: 0 11px;
+  background: #eef2f6;
+  color: #344054;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.modalActions button {
+  width: auto;
+  min-width: 116px;
+  margin-top: 0;
+}
+
 @media (max-width: 900px) {
   .appShell {
     padding: 16px;
@@ -254,5 +455,25 @@ button:disabled {
   .layout {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .previewGrid,
+  .previewTitle {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .previewScroller {
+    height: 480px;
+  }
+
+  .modelConfigSummary,
+  .modalActions {
+    display: grid;
+  }
+
+  .modelConfigSummary .secondaryButton,
+  .modalActions button {
+    width: 100%;
   }
 }

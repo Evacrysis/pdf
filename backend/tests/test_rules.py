@@ -1,6 +1,6 @@
 from typing import Optional
 
-from app.models import TextLine, TranslatedLine, TranslationOptions
+from app.models import JobRecord, JobStatus, TextLine, TranslatedLine, TranslationOptions
 from app.services.rules import RuleEngine
 
 
@@ -40,3 +40,25 @@ def test_api_key_is_not_serialized() -> None:
     options = TranslationOptions(api_key="secret-value")
     dumped = options.model_dump()
     assert "api_key" not in dumped
+
+
+def test_job_progress_is_serialized(tmp_path) -> None:
+    record = JobRecord(
+        id="job-1",
+        status=JobStatus.running,
+        source_filename="source.pdf",
+        source_path=tmp_path / "source.pdf",
+        options=TranslationOptions(),
+        stage="translating",
+        progress=0.5,
+        total_pages=4,
+        processed_pages=2,
+        total_lines=40,
+        processed_lines=20,
+    )
+
+    dumped = record.model_dump()
+
+    assert dumped["stage"] == "translating"
+    assert dumped["progress"] == 0.5
+    assert dumped["processed_lines"] == 20

@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from app.config import settings
 from app.models import ModelConnectionTestRequest, TranslationOptions
 from app.services.jobs import job_store
+from app.services.pdf_preview import render_page_png
 from app.services.translator import get_translator
 
 app = FastAPI(title="PDF Translation Workbench", version="0.1.0")
@@ -108,3 +109,27 @@ async def download(job_id: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail="Output PDF not found.")
     return FileResponse(path, media_type="application/pdf", filename=f"{job_id}_translated.pdf")
+
+
+@app.get("/api/jobs/{job_id}/preview/{kind}/{page_index}")
+async def preview_page(job_id: str, kind: str, page_index: int) -> FileResponse:
+    record = job_store.get(job_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    if kind == "source":
+        pdf_path = Path(record.source_path)
+    elif kind == "translated":
+        if record.output_path is None:
+            raise HTTPException(status_code=404, detail="Translated PDF not ready.")
+        pdf_path = Path(record.output_path)
+    else:
+        raise HTTPException(status_code=400, detail="Preview kind must be source or translated.")
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF not found.")
+
+    preview_path = pdf_path.parent / "preview" / kind / f"page-{page_index + 1}.png"
+    try:
+        rendered = render_page_png(pdf_path, page_index, preview_path)
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(rendered, media_type="image/png")
