@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from abc import ABC, abstractmethod
 from urllib.parse import urlparse
@@ -19,6 +20,39 @@ Rules:
 - Prefer natural Japanese. If one line can fit naturally, do not force a line break.
 - Keep source punctuation meaning but do not invent content.
 """
+
+
+RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
+
+
+async def _post_json_with_retries(
+    url: str,
+    *,
+    payload: dict,
+    headers: dict[str, str],
+    timeout: int,
+    error_parser,
+    provider_name: str,
+    max_attempts: int = 4,
+) -> httpx.Response:
+    last_error: str | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(url, json=payload, headers=headers)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last_error = f"{provider_name} request failed on attempt {attempt}/{max_attempts}: {exc}"
+        else:
+            if response.status_code < 400:
+                return response
+            last_error = error_parser(response)
+            if response.status_code not in RETRYABLE_STATUS_CODES:
+                raise RuntimeError(last_error)
+
+        if attempt < max_attempts:
+            await asyncio.sleep(min(8, 0.8 * (2 ** (attempt - 1))))
+
+    raise RuntimeError(last_error or f"{provider_name} request failed after {max_attempts} attempts.")
 
 
 class Translator(ABC):
@@ -107,10 +141,14 @@ class OpenAICompatibleTranslator(Translator):
             ],
         }
         headers = {"Authorization": f"Bearer {api_key}"}
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(completion_url, json=payload, headers=headers)
-        if response.status_code >= 400:
-            raise RuntimeError(self._extract_error(response))
+        response = await _post_json_with_retries(
+            completion_url,
+            payload=payload,
+            headers=headers,
+            timeout=120,
+            error_parser=self._extract_error,
+            provider_name="OpenAI-compatible model API",
+        )
         try:
             body = response.json()
         except ValueError:
@@ -189,8 +227,26 @@ class OpenAICompatibleTranslator(Translator):
             "temperature": 0,
             "messages": [{"role": "user", "content": "Reply with OK only."}],
         }
-        async with httpx.AsyncClient(timeout=30) as client:
-            probe_response = await client.post(self.completion_url(base_url), json=probe_payload, headers=headers)
+        try:
+            probe_response = await _post_json_with_retries(
+                self.completion_url(base_url),
+                payload=probe_payload,
+                headers=headers,
+                timeout=30,
+                error_parser=self._extract_error,
+                provider_name="OpenAI-compatible model API",
+                max_attempts=2,
+            )
+        except RuntimeError as exc:
+            return ModelConnectionTestResult(
+                ok=False,
+                provider=options.provider,
+                normalized_base_url=normalized,
+                model=model,
+                model_found=model_found,
+                sample_models=sample_models,
+                message=str(exc),
+            )
         if probe_response.status_code >= 400:
             return ModelConnectionTestResult(
                 ok=False,
@@ -338,10 +394,14 @@ class AnthropicCompatibleTranslator(Translator):
                 }
             ],
         }
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(self.messages_url(base_url), json=payload, headers=self._headers(api_key))
-        if response.status_code >= 400:
-            raise RuntimeError(self._extract_error(response))
+        response = await _post_json_with_retries(
+            self.messages_url(base_url),
+            payload=payload,
+            headers=self._headers(api_key),
+            timeout=120,
+            error_parser=self._extract_error,
+            provider_name="Anthropic-compatible model API",
+        )
         try:
             body = response.json()
         except ValueError:
@@ -406,11 +466,25 @@ class AnthropicCompatibleTranslator(Translator):
             "temperature": 0,
             "messages": [{"role": "user", "content": "Reply with OK only."}],
         }
-        async with httpx.AsyncClient(timeout=30) as client:
-            probe_response = await client.post(
+        try:
+            probe_response = await _post_json_with_retries(
                 self.messages_url(base_url),
-                json=probe_payload,
+                payload=probe_payload,
                 headers=self._headers(api_key),
+                timeout=30,
+                error_parser=self._extract_error,
+                provider_name="Anthropic-compatible model API",
+                max_attempts=2,
+            )
+        except RuntimeError as exc:
+            return ModelConnectionTestResult(
+                ok=False,
+                provider=options.provider,
+                normalized_base_url=normalized,
+                model=model,
+                model_found=model_found,
+                sample_models=sample_models,
+                message=str(exc),
             )
         if probe_response.status_code >= 400:
             return ModelConnectionTestResult(

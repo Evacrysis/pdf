@@ -2,7 +2,7 @@ import asyncio
 
 import httpx
 
-from app.models import TranslationOptions
+from app.models import TextLine, TranslationOptions
 from app.services.translator import AnthropicCompatibleTranslator, OpenAICompatibleTranslator
 
 
@@ -99,3 +99,52 @@ def test_openai_connection_test_probes_chat_completion(monkeypatch) -> None:
         ("GET", "https://api.example.com/v1/models"),
         ("POST", "https://api.example.com/v1/chat/completions"),
     ]
+
+
+def test_openai_translation_retries_remote_disconnect(monkeypatch) -> None:
+    calls = 0
+
+    class FakeAsyncClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url: str, json: dict, headers: dict[str, str]):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "{\"translation\":\"開を押します。\"}"}}]},
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Press Open",
+        bbox=(0, 0, 100, 20),
+        font_name="Helvetica",
+        font_size=12,
+    )
+
+    result = asyncio.run(
+        OpenAICompatibleTranslator().translate_line(
+            line,
+            TranslationOptions(
+                provider="openai_compatible",
+                base_url="https://api.example.com",
+                model="gpt-test",
+                api_key="token",
+            ),
+        )
+    )
+
+    assert result == "開を押します。"
+    assert calls == 2

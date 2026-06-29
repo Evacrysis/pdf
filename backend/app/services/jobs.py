@@ -15,6 +15,7 @@ from app.models import JobRecord, JobStatus, PageReport, TranslatedLine, Transla
 from app.services.pdf_geometry import extract_text_lines
 from app.services.pdf_writer import write_editable_pdf
 from app.services.rules import RuleEngine
+from app.services.translation_memory import TranslationMemory
 from app.services.translator import get_translator
 
 
@@ -92,6 +93,19 @@ class JobStore:
         finally:
             doc.close()
 
+    @staticmethod
+    def _selected_page_indexes(options: TranslationOptions, total_pages: int) -> set[int]:
+        start = options.page_start or 1
+        end = options.page_end or total_pages
+        if start < 1 or end < 1:
+            raise RuntimeError("Page range must use 1-based positive page numbers.")
+        if start > end:
+            raise RuntimeError("Page range start must be less than or equal to page range end.")
+        if start > total_pages:
+            raise RuntimeError(f"Page range starts after the document ends. total_pages={total_pages}")
+        end = min(end, total_pages)
+        return set(range(start - 1, end))
+
     async def process(self, job_id: str) -> None:
         record = self.get(job_id)
         if record is None:
@@ -102,7 +116,11 @@ class JobStore:
         self._persist(record)
         try:
             total_pages = self._page_count(record.source_path)
-            lines = extract_text_lines(str(record.source_path))
+            selected_pages = self._selected_page_indexes(record.options, total_pages)
+            all_lines = extract_text_lines(str(record.source_path))
+            lines = [line for line in all_lines if line.page_index in selected_pages]
+            if not lines:
+                raise RuntimeError("Selected page range contains no extractable text lines.")
             self._set_progress(
                 record,
                 stage="translating",
@@ -112,10 +130,23 @@ class JobStore:
                 processed_pages=0,
             )
             translator = get_translator(record.options.provider)
+            memory = TranslationMemory(self.root / "translation-memory.json")
             translated: list[TranslatedLine] = []
             processed_pages: set[int] = set()
             for index, line in enumerate(lines, start=1):
-                translated_text = await translator.translate_line(line, record.options)
+                cached = memory.get(line, record.options)
+                if cached is None:
+                    try:
+                        translated_text = await translator.translate_line(line, record.options)
+                    except Exception as exc:
+                        snippet = line.text[:80].replace("\n", " ")
+                        raise RuntimeError(
+                            f"Translation failed at page {line.page_index + 1}, line {line.line_index + 1}: "
+                            f"{exc}. source={snippet}"
+                        ) from exc
+                    memory.set(line, record.options, translated_text)
+                else:
+                    translated_text = cached
                 translated.append(
                     TranslatedLine(
                         source=line,
@@ -165,7 +196,7 @@ class JobStore:
             hard_failures = [gate for gate in gates if gate.severity == "hard_fail"]
             record.status = JobStatus.failed if record.options.strict_mode and hard_failures else JobStatus.completed
             record.stage = "completed" if record.status == JobStatus.completed else "qa_failed"
-            record.processed_pages = record.total_pages
+            record.processed_pages = len({line.source.page_index for line in translated})
             record.processed_lines = record.total_lines
             record.progress = 1
         except Exception as exc:

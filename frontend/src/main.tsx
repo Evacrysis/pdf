@@ -87,6 +87,8 @@ function App() {
   const [file, setFile] = useState<File | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState("en");
   const [targetLanguage, setTargetLanguage] = useState("ja");
+  const [pageStart, setPageStart] = useState("");
+  const [pageEnd, setPageEnd] = useState("");
   const [provider, setProvider] = useState(storedModelConfig.provider);
   const [baseUrl, setBaseUrl] = useState(storedModelConfig.baseUrl);
   const [model, setModel] = useState(storedModelConfig.model);
@@ -164,6 +166,16 @@ function App() {
       setError("请先点击“测试 API”，并确认连接正常后再开始翻译。");
       return;
     }
+    const startPage = pageStart.trim();
+    const endPage = pageEnd.trim();
+    if ((startPage && Number(startPage) < 1) || (endPage && Number(endPage) < 1)) {
+      setError("页码范围必须使用从 1 开始的正整数。");
+      return;
+    }
+    if (startPage && endPage && Number(startPage) > Number(endPage)) {
+      setError("起始页不能大于结束页。");
+      return;
+    }
     setBusy(true);
     setError("");
     const data = new FormData();
@@ -175,6 +187,8 @@ function App() {
     data.append("model", model);
     data.append("api_key", apiKey);
     data.append("strict_mode", String(strictMode));
+    if (startPage) data.append("page_start", startPage);
+    if (endPage) data.append("page_end", endPage);
     const response = await fetch(`${apiBase}/api/jobs`, { method: "POST", body: data });
     setBusy(false);
     if (!response.ok) {
@@ -256,6 +270,29 @@ function App() {
                 <option value="zh">中文</option>
                 <option value="en">English</option>
               </select>
+            </label>
+          </div>
+
+          <div className="grid2">
+            <label>
+              起始页
+              <input
+                min="1"
+                placeholder="默认第 1 页"
+                type="number"
+                value={pageStart}
+                onChange={(event) => setPageStart(event.target.value)}
+              />
+            </label>
+            <label>
+              结束页
+              <input
+                min="1"
+                placeholder="默认最后一页"
+                type="number"
+                value={pageEnd}
+                onChange={(event) => setPageEnd(event.target.value)}
+              />
             </label>
           </div>
 

@@ -75,6 +75,8 @@ async def create_job(
     model: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
     strict_mode: bool = Form(True),
+    page_start: Optional[int] = Form(None),
+    page_end: Optional[int] = Form(None),
 ) -> dict:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
@@ -86,6 +88,8 @@ async def create_job(
         model=model,
         api_key=api_key,
         strict_mode=strict_mode,
+        page_start=page_start,
+        page_end=page_end,
     )
     record = await job_store.create(file, options)
     background_tasks.add_task(job_store.process, record.id)

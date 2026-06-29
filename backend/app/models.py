@@ -28,6 +28,8 @@ class TranslationOptions(BaseModel):
     model: Optional[str] = None
     api_key: Optional[str] = Field(default=None, exclude=True)
     strict_mode: bool = True
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
 
 
 class ModelConnectionTestRequest(BaseModel):
