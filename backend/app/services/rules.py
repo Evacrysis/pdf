@@ -96,7 +96,16 @@ class RuleEngine:
 
     def _no_english_residue(self, lines: list[TranslatedLine]) -> list[GateResult]:
         failures: list[GateResult] = []
-        allowed = {"Channel", "Group", "Matter", "Alexa", "Google", "Apple", "Yoolax"}
+        allowed = {
+            "Alexa",
+            "Apple",
+            "Google",
+            "Matter",
+            "Shades",
+            "Shangri",
+            "Yoolax",
+            "Zebra",
+        }
         for item in lines:
             if not item.source.localizable:
                 continue

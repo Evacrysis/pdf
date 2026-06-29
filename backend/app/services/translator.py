@@ -17,6 +17,8 @@ Rules:
 - Preserve complete source meaning. No omission, no shortening that loses meaning.
 - Protected button/display/icon tokens must remain unchanged in Japanese brackets when appropriate.
 - Do not translate device/accessory printed English or protected display values.
+- Translate ordinary command button words into Japanese, for example "Open" -> "開", "Close" -> "閉",
+  "Stop" -> "停止", "Favorite Position" -> "お気に入り位置".
 - Prefer natural Japanese. If one line can fit naturally, do not force a line break.
 - Keep source punctuation meaning but do not invent content.
 """

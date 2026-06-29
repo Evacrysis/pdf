@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from statistics import median
+from collections import Counter
 
 import fitz
 
@@ -9,7 +9,7 @@ from app.models import TextLine
 
 
 PROTECTED_TOKEN_RE = re.compile(
-    r"(?:(?:CH|P)\+?|CH-|P[12]|OK|A\d+|\d{2}|GC|EC|on|[124]x|\"[^\"]*\"|'[^']*')"
+    r"(?<![A-Za-z0-9])(?:CH\+|CH-|P[12]|OK|A\d+|\d{2}|GC|EC|on|[124]x)(?![A-Za-z0-9])"
 )
 
 
@@ -38,12 +38,17 @@ def _classify_roles(lines: list[TextLine]) -> None:
     sizes = [line.font_size for line in lines if line.localizable and line.font_size > 0]
     if not sizes:
         return
-    body_size = median(sizes)
+    rounded_sizes = [round(size, 1) for size in sizes]
+    body_size = Counter(rounded_sizes).most_common(1)[0][0]
     for line in lines:
-        if line.font_size >= body_size + 4:
+        if line.font_size >= body_size + 18:
             line.role = "title"
-        elif line.font_size >= body_size + 1.5:
+        elif line.font_size >= body_size + 8:
             line.role = "section_title"
+        elif line.font_size >= body_size + 4:
+            line.role = "subsection_title"
+        elif line.font_size >= body_size + 1.5:
+            line.role = "emphasis"
         elif line.font_size <= body_size - 2:
             line.role = "figure_label"
         else:

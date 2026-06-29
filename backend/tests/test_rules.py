@@ -29,6 +29,11 @@ def test_rejects_english_residue() -> None:
     assert any(result.code == "english_residue" for result in results)
 
 
+def test_allows_window_covering_product_terms() -> None:
+    results = RuleEngine().validate([line("For Shangri-la Shades", "Shangri-la Shades 用")])
+    assert not any(result.code == "english_residue" for result in results)
+
+
 def test_rejects_missing_protected_token() -> None:
     item = line('Press "OK"', "押します。")
     item.source.protected_tokens = ['"OK"']

@@ -7,6 +7,9 @@ from pathlib import Path
 from app.models import TextLine, TranslationOptions
 
 
+TRANSLATION_MEMORY_VERSION = "2026-06-29-token-boundary-command-glossary-v3"
+
+
 class TranslationMemory:
     """Persistent text-level memory for deterministic repeated translations."""
 
@@ -34,6 +37,7 @@ class TranslationMemory:
     @staticmethod
     def key_for(line: TextLine, options: TranslationOptions) -> str:
         payload = {
+            "version": TRANSLATION_MEMORY_VERSION,
             "source_language": options.source_language,
             "target_language": options.target_language,
             "provider": options.provider,
