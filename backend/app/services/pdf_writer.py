@@ -32,9 +32,15 @@ def write_editable_pdf(
 ) -> list[TranslatedLine]:
     if not font_path.exists():
         raise RuntimeError(f"Configured PDF font does not exist: {font_path}")
+    if font_path.suffix.lower() != ".ttf":
+        raise RuntimeError(
+            "Configured PDF font must be a TrueType .ttf file. "
+            "CFF/OpenType fonts can extract as Japanese but render as corrupt glyphs in generated PDFs."
+        )
 
     doc = fitz.open(source_pdf)
     font = fitz.Font(fontfile=str(font_path))
+    font_name = "F0"
     by_page: dict[int, list[TranslatedLine]] = {}
     for item in translated_lines:
         by_page.setdefault(item.source.page_index, []).append(item)
@@ -49,6 +55,7 @@ def write_editable_pdf(
             rect = fitz.Rect(x0, y0, x1, y1)
             page.add_redact_annot(rect, fill=(1, 1, 1))
         page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+        page.insert_font(fontname=font_name, fontfile=str(font_path))
 
         for item in items:
             src = item.source
@@ -64,7 +71,7 @@ def write_editable_pdf(
                 page.insert_text(
                     fitz.Point(x0, baseline + offset * line_step),
                     text,
-                    fontfile=str(font_path),
+                    fontname=font_name,
                     fontsize=item.output_font_size,
                     color=(0, 0, 0),
                 )

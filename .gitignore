@@ -11,4 +11,4 @@ frontend/dist/
 fonts/*.otf
 fonts/*.ttf
 !fonts/.gitkeep
-
+!fonts/NotoSansCJKjp-Regular.ttf

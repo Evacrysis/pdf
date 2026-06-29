@@ -7,7 +7,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-4.1-mini}
       DEFAULT_TARGET_LANGUAGE: ${DEFAULT_TARGET_LANGUAGE:-ja}
-      PDF_FONT_PATH: ${PDF_FONT_PATH:-/app/fonts/SourceHanSansJP-Regular.otf}
+      PDF_FONT_PATH: ${PDF_FONT_PATH:-/app/fonts/NotoSansCJKjp-Regular.ttf}
       STRICT_MODE: ${STRICT_MODE:-true}
       STORAGE_DIR: /app/storage
     volumes:

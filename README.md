@@ -23,18 +23,18 @@ docker compose up --build
 
 ## 字体
 
-日文输出必须使用规则指定字体。将字体放入 `fonts/`，或在 `.env` 中配置宿主机字体路径并挂载到容器。
+日文输出必须使用项目内置 TrueType 日文字体。不要把 `PDF_FONT_PATH` 指到 CFF/OpenType `.otf` 字体，否则 PDF 文本可能可提取为日文但渲染成错字。
 
 默认期望:
 
 ```text
-/app/fonts/SourceHanSansJP-Regular.otf
+/app/fonts/NotoSansCJKjp-Regular.ttf
 ```
 
-本机可使用现有 skill 字体:
+本机开发如果要覆盖字体，必须使用可嵌入的 `.ttf`：
 
 ```text
-/Users/a123/work/skills/japanese-window-covering-localization/日本字体新/SourceHanSansJP-Regular.otf
+PDF_FONT_PATH=/absolute/path/to/Japanese-Regular.ttf
 ```
 
 ## 工作流
