@@ -41,6 +41,20 @@ def test_rejects_missing_protected_token() -> None:
     assert any(result.code == "protected_token_missing" for result in results)
 
 
+def test_rejects_known_fixed_translation_mismatch() -> None:
+    results = RuleEngine().validate(
+        [line("1-9 Channel: One channel corresponds to one blind.", "1つのブラインドに対応します。")]
+    )
+
+    assert any(result.code == "fixed_translation_mismatch" for result in results)
+
+
+def test_rejects_empty_icon_brackets_for_quote_gap_source() -> None:
+    results = RuleEngine().validate([line('Press "    " or "    "', "「」または「」を押す")])
+
+    assert any(result.code == "empty_protected_icon_bracket" for result in results)
+
+
 def test_api_key_is_not_serialized() -> None:
     options = TranslationOptions(api_key="secret-value")
     dumped = options.model_dump()

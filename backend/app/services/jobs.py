@@ -14,6 +14,7 @@ from app.config import settings
 from app.models import JobRecord, JobStatus, PageReport, TranslatedLine, TranslationOptions
 from app.services.pdf_geometry import extract_text_lines
 from app.services.pdf_writer import write_editable_pdf
+from app.services.line_processing import fixed_translation_for, merge_known_semantic_lines
 from app.services.rules import RuleEngine
 from app.services.translation_memory import TranslationMemory
 from app.services.translator import get_translator
@@ -118,7 +119,7 @@ class JobStore:
             total_pages = self._page_count(record.source_path)
             selected_pages = self._selected_page_indexes(record.options, total_pages)
             all_lines = extract_text_lines(str(record.source_path))
-            lines = [line for line in all_lines if line.page_index in selected_pages]
+            lines = merge_known_semantic_lines([line for line in all_lines if line.page_index in selected_pages])
             if not lines:
                 raise RuntimeError("Selected page range contains no extractable text lines.")
             self._set_progress(
@@ -134,19 +135,23 @@ class JobStore:
             translated: list[TranslatedLine] = []
             processed_pages: set[int] = set()
             for index, line in enumerate(lines, start=1):
-                cached = memory.get(line, record.options)
-                if cached is None:
-                    try:
-                        translated_text = await translator.translate_line(line, record.options)
-                    except Exception as exc:
-                        snippet = line.text[:80].replace("\n", " ")
-                        raise RuntimeError(
-                            f"Translation failed at page {line.page_index + 1}, line {line.line_index + 1}: "
-                            f"{exc}. source={snippet}"
-                        ) from exc
-                    memory.set(line, record.options, translated_text)
+                fixed_translation = fixed_translation_for(line)
+                if fixed_translation is not None:
+                    translated_text = fixed_translation
                 else:
-                    translated_text = cached
+                    cached = memory.get(line, record.options)
+                    if cached is None:
+                        try:
+                            translated_text = await translator.translate_line(line, record.options)
+                        except Exception as exc:
+                            snippet = line.text[:80].replace("\n", " ")
+                            raise RuntimeError(
+                                f"Translation failed at page {line.page_index + 1}, line {line.line_index + 1}: "
+                                f"{exc}. source={snippet}"
+                            ) from exc
+                        memory.set(line, record.options, translated_text)
+                    else:
+                        translated_text = cached
                 translated.append(
                     TranslatedLine(
                         source=line,

@@ -5,9 +5,15 @@ from pathlib import Path
 import fitz
 
 from app.models import TranslatedLine
+from app.services.line_processing import QUOTE_GAP_RE
 
 
 def _wrap_text(text: str, font: fitz.Font, font_size: float, max_width: float) -> list[str]:
+    if "\n" in text:
+        wrapped: list[str] = []
+        for paragraph in text.splitlines():
+            wrapped.extend(_wrap_text(paragraph, font, font_size, max_width) if paragraph else [""])
+        return wrapped
     if font.text_length(text, fontsize=font_size) <= max_width:
         return [text]
     parts: list[str] = []
@@ -22,6 +28,106 @@ def _wrap_text(text: str, font: fitz.Font, font_size: float, max_width: float) -
     if current:
         parts.append(current)
     return parts
+
+
+def _is_quote_gap_line(text: str) -> bool:
+    return bool(QUOTE_GAP_RE.match(" ".join(text.split())))
+
+
+def _icon_gap_rects(page: fitz.Page, bbox: tuple[float, float, float, float]) -> list[fitz.Rect]:
+    source_rect = fitz.Rect(*bbox)
+    candidates: list[fitz.Rect] = []
+    for drawing in page.get_drawings():
+        rect = drawing.get("rect")
+        if not rect:
+            continue
+        if rect.x0 < source_rect.x0 or rect.x1 > source_rect.x1:
+            continue
+        if rect.y1 < source_rect.y0 - 4 or rect.y0 > source_rect.y1 + 4:
+            continue
+        width = rect.width
+        height = rect.height
+        if 6 <= width <= 22 and 6 <= height <= 22:
+            candidates.append(fitz.Rect(rect))
+    candidates.sort(key=lambda rect: rect.x0)
+    return candidates[:2]
+
+
+def _redaction_rects(page: fitz.Page, item: TranslatedLine) -> list[fitz.Rect]:
+    return [fitz.Rect(*item.source.bbox)]
+
+
+def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
+    src = item.source
+    x0, _, x1, _ = src.bbox
+    original = max(4, x1 - x0)
+    available = max(original, page.rect.width - x0 - 36)
+    desired = max(
+        [font.text_length(line, fontsize=item.output_font_size) for line in item.translated_text.splitlines() if line]
+        or [0]
+    ) + 2
+    if src.role in {"title", "section_title", "subsection_title", "emphasis"}:
+        return max(original, available)
+    if desired <= available:
+        return max(original, desired)
+    if src.role == "body" and original >= 90:
+        return max(original, min(available, original * 1.8))
+    if src.role == "figure_label":
+        return max(original, min(available, original * 2.4))
+    return original
+
+
+def _baseline(item: TranslatedLine) -> float:
+    src = item.source
+    x0, y0, x1, y1 = src.bbox
+    if src.role in {"title", "section_title", "subsection_title"}:
+        return y0 + src.font_size * 1.08
+    return y1 - (src.font_size * 0.22)
+
+
+def _insert_text(page: fitz.Page, point: fitz.Point, text: str, font_name: str, font_size: float) -> None:
+    if text:
+        page.insert_text(point, text, fontname=font_name, fontsize=font_size, color=(0, 0, 0))
+
+
+def _write_quote_gap_line(
+    page: fitz.Page,
+    item: TranslatedLine,
+    font: fitz.Font,
+    font_name: str,
+    icon_streams: list[tuple[fitz.Rect, bytes]],
+) -> bool:
+    if len(icon_streams) < 2:
+        return False
+    baseline = _baseline(item)
+    size = item.output_font_size
+    left_open = "「"
+    middle = "」または「"
+    tail = "」を押す"
+    gap = 1.5
+    icon_height = size * 0.9
+    icon_widths = [icon_height * (rect.width / max(rect.height, 1)) for rect, _ in icon_streams[:2]]
+    widths = [
+        font.text_length(left_open, fontsize=size),
+        font.text_length(middle, fontsize=size),
+        font.text_length(tail, fontsize=size),
+    ]
+    total = sum(widths) + sum(icon_widths) + gap * 4
+    x0 = item.source.bbox[0]
+    x = min(x0, max(36, page.rect.width - 36 - total))
+    icon_top = baseline - icon_height + 2
+
+    _insert_text(page, fitz.Point(x, baseline), left_open, font_name, size)
+    x += widths[0] + gap
+    page.insert_image(fitz.Rect(x, icon_top, x + icon_widths[0], icon_top + icon_height), stream=icon_streams[0][1], overlay=True)
+    x += icon_widths[0] + gap
+    _insert_text(page, fitz.Point(x, baseline), middle, font_name, size)
+    x += widths[1] + gap
+    page.insert_image(fitz.Rect(x, icon_top, x + icon_widths[1], icon_top + icon_height), stream=icon_streams[1][1], overlay=True)
+    x += icon_widths[1] + gap
+    _insert_text(page, fitz.Point(x, baseline), tail, font_name, size)
+    item.wrapped_lines = ["「source-icon」または「source-icon」を押す"]
+    return True
 
 
 def write_editable_pdf(
@@ -47,13 +153,20 @@ def write_editable_pdf(
 
     for page_index, items in by_page.items():
         page = doc[page_index]
+        quote_icon_streams: dict[int, list[tuple[fitz.Rect, bytes]]] = {}
         for item in items:
             src = item.source
             if not src.localizable:
                 continue
-            x0, y0, x1, y1 = src.bbox
-            rect = fitz.Rect(x0, y0, x1, y1)
-            page.add_redact_annot(rect, fill=(1, 1, 1))
+            if _is_quote_gap_line(src.text):
+                streams: list[tuple[fitz.Rect, bytes]] = []
+                for rect in _icon_gap_rects(page, src.bbox):
+                    pix = page.get_pixmap(matrix=fitz.Matrix(4, 4), clip=fitz.Rect(rect), alpha=False)
+                    streams.append((fitz.Rect(rect), pix.tobytes("png")))
+                quote_icon_streams[id(item)] = streams
+            for rect in _redaction_rects(page, item):
+                if rect.width > 0 and rect.height > 0:
+                    page.add_redact_annot(rect, fill=(1, 1, 1))
         page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
         page.insert_font(fontname=font_name, fontfile=str(font_path))
 
@@ -61,19 +174,25 @@ def write_editable_pdf(
             src = item.source
             if not src.localizable:
                 continue
+            if _is_quote_gap_line(src.text):
+                if not _write_quote_gap_line(page, item, font, font_name, quote_icon_streams.get(id(item), [])):
+                    raise RuntimeError(
+                        f"Protected source icons could not be located for quote-gap line on page {src.page_index + 1}."
+                    )
+                continue
             x0, y0, x1, y1 = src.bbox
-            max_width = max(4, x1 - x0)
+            max_width = _max_width(page, item, font)
             wrapped = _wrap_text(item.translated_text, font, item.output_font_size, max_width)
             item.wrapped_lines = wrapped
             line_step = item.output_font_size * 1.35
-            baseline = y1 - (src.font_size * 0.22)
+            baseline = _baseline(item)
             for offset, text in enumerate(wrapped):
-                page.insert_text(
+                _insert_text(
+                    page,
                     fitz.Point(x0, baseline + offset * line_step),
                     text,
-                    fontname=font_name,
-                    fontsize=item.output_font_size,
-                    color=(0, 0, 0),
+                    font_name,
+                    item.output_font_size,
                 )
 
     output_pdf.parent.mkdir(parents=True, exist_ok=True)

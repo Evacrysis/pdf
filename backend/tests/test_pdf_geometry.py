@@ -1,5 +1,5 @@
 from app.models import TextLine
-from app.services.pdf_geometry import PROTECTED_TOKEN_RE, _classify_roles
+from app.services.pdf_geometry import PROTECTED_TOKEN_RE, _classify_roles, _is_localizable
 
 
 def test_protected_tokens_do_not_match_inside_words() -> None:
@@ -44,3 +44,9 @@ def test_title_roles_are_split_by_font_level() -> None:
     _classify_roles(lines)
 
     assert [line.role for line in lines] == ["body", "subsection_title", "section_title", "title"]
+
+
+def test_battery_artwork_text_is_not_localizable() -> None:
+    assert not _is_localizable("Lithium Cell")
+    assert not _is_localizable("CR2450")
+    assert not _is_localizable("3V")

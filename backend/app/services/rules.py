@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 
 from app.models import GateResult, GateSeverity, TranslatedLine
+from app.services.line_processing import FIXED_TRANSLATIONS, QUOTE_GAP_RE
 
 
 ASCII_WORD_RE = re.compile(r"[A-Za-z]{3,}")
@@ -17,6 +18,8 @@ class RuleEngine:
         results.extend(self._same_role_font_consistency(lines))
         results.extend(self._protected_tokens_preserved(lines))
         results.extend(self._no_english_residue(lines))
+        results.extend(self._fixed_translations_applied(lines))
+        results.extend(self._no_empty_protected_icon_brackets(lines))
         return results
 
     def _no_missing_translation(self, lines: list[TranslatedLine]) -> list[GateResult]:
@@ -32,6 +35,46 @@ class RuleEngine:
                         page_index=src.page_index,
                         line_index=src.line_index,
                         message="Localizable source line has empty translation.",
+                    )
+                )
+        return failures
+
+    def _fixed_translations_applied(self, lines: list[TranslatedLine]) -> list[GateResult]:
+        failures: list[GateResult] = []
+        for item in lines:
+            expected = FIXED_TRANSLATIONS.get(" ".join(item.source.text.split()))
+            if expected is None:
+                continue
+            actual = " ".join(item.translated_text.split())
+            expected_flat = " ".join(expected.split())
+            if actual != expected_flat:
+                failures.append(
+                    GateResult(
+                        code="fixed_translation_mismatch",
+                        severity=GateSeverity.hard_fail,
+                        passed=False,
+                        page_index=item.source.page_index,
+                        line_index=item.source.line_index,
+                        message="Known repeated source text did not use the locked translation.",
+                        details={"expected": expected, "translation": item.translated_text},
+                    )
+                )
+        return failures
+
+    def _no_empty_protected_icon_brackets(self, lines: list[TranslatedLine]) -> list[GateResult]:
+        failures: list[GateResult] = []
+        for item in lines:
+            source = " ".join(item.source.text.split())
+            if QUOTE_GAP_RE.match(source) and re.search(r"「\s*」", item.translated_text):
+                failures.append(
+                    GateResult(
+                        code="empty_protected_icon_bracket",
+                        severity=GateSeverity.hard_fail,
+                        passed=False,
+                        page_index=item.source.page_index,
+                        line_index=item.source.line_index,
+                        message="Source quote gap contains a protected icon; final text must not be an empty Japanese bracket.",
+                        details={"translation": item.translated_text},
                     )
                 )
         return failures

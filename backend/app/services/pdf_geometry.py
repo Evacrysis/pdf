@@ -29,6 +29,8 @@ def _is_localizable(text: str) -> bool:
         return False
     if re.fullmatch(r"[\W\d_]+", text):
         return False
+    if re.fullmatch(r"(?:Lithium Cell|CR\d{4}|3V)", text.strip(), re.IGNORECASE):
+        return False
     if re.fullmatch(r"(?:[124]x|CH\+|CH-|P[12]|OK|A\d+|\d{2}|GC|EC|on)", text):
         return False
     return bool(re.search(r"[A-Za-z]", text))
