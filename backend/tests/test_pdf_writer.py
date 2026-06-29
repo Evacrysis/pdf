@@ -4,7 +4,7 @@ import fitz
 import pytest
 
 from app.models import TextLine, TranslatedLine
-from app.services.pdf_writer import _label_start_x, _max_width, _wrap_text, write_editable_pdf
+from app.services.pdf_writer import _label_start_x, _max_width, _redaction_rects, _wrap_text, write_editable_pdf
 
 
 def _make_source_pdf(path: Path) -> None:
@@ -206,3 +206,89 @@ def test_diagram_labels_align_away_from_artwork_lines(tmp_path) -> None:
     assert left_x < left.bbox[0]
     assert all(left_x + font.text_length(line, fontsize=14) <= 220 - 55 - 14 for line in left_wrapped)
     assert right_x >= 220 + 55 + 14
+
+
+def test_section_title_redaction_does_not_cover_underline() -> None:
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Features",
+        bbox=(50, 82, 150, 116),
+        font_name="Helvetica",
+        font_size=24,
+        role="section_title",
+    )
+    item = TranslatedLine(source=line, translated_text="特徴", output_font_size=24)
+
+    rects = _redaction_rects(None, item)  # type: ignore[arg-type]
+
+    assert rects[0].y1 <= 108
+
+
+def test_below_artwork_labels_are_centered(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=420, height=260)
+    page.draw_rect(fitz.Rect(190, 70, 270, 180), color=(0, 0, 0))
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    page = doc[0]
+    font = fitz.Font(fontfile=str(font_path))
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Tilt vanes",
+        bbox=(206, 186, 254, 206),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    try:
+        item = TranslatedLine(source=line, translated_text="チルトベーン", output_font_size=14)
+        wrapped = _wrap_text(item.translated_text, font, 14, _max_width(page, item, font))
+        x = _label_start_x(page, item, wrapped, font)
+    finally:
+        doc.close()
+
+    width = font.text_length(item.translated_text, fontsize=14)
+    assert abs((x + width / 2) - 230) <= 1
+
+
+def test_lower_right_diagram_label_stays_right_aligned(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=420, height=260)
+    page.draw_circle(fitz.Point(220, 130), 55, color=(0, 0, 0))
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    page = doc[0]
+    font = fitz.Font(fontfile=str(font_path))
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="1-9 Channel: One channel corresponds to one blind.",
+        bbox=(286, 178, 400, 198),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    try:
+        item = TranslatedLine(source=line, translated_text="1～9チャンネル：", output_font_size=14)
+        wrapped = _wrap_text(item.translated_text, font, 14, _max_width(page, item, font))
+        x = _label_start_x(page, item, wrapped, font)
+    finally:
+        doc.close()
+
+    assert x >= 220 + 55 + 14

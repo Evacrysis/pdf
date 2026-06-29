@@ -70,7 +70,10 @@ def _icon_gap_rects(page: fitz.Page, bbox: tuple[float, float, float, float]) ->
 
 
 def _redaction_rects(page: fitz.Page, item: TranslatedLine) -> list[fitz.Rect]:
-    return [fitz.Rect(*item.source.bbox)]
+    rect = fitz.Rect(*item.source.bbox)
+    if item.source.role == "section_title":
+        rect.y1 = min(rect.y1, rect.y0 + item.source.font_size * 1.08)
+    return [rect]
 
 
 def _large_artwork_rects(page: fitz.Page) -> list[fitz.Rect]:
@@ -80,10 +83,10 @@ def _large_artwork_rects(page: fitz.Page) -> list[fitz.Rect]:
         if not rect:
             continue
         rect = fitz.Rect(rect)
-        if rect.width < 55 or rect.height < 55:
+        if rect.width < 35 or rect.height < 45:
             continue
         aspect = rect.width / max(rect.height, 1)
-        if 0.55 <= aspect <= 1.85:
+        if 0.25 <= aspect <= 2.5:
             rects.append(rect)
     return rects
 
@@ -123,6 +126,19 @@ def _diagram_side(page: fitz.Page, item: TranslatedLine) -> tuple[fitz.Rect, str
     return None
 
 
+def _diagram_below(page: fitz.Page, item: TranslatedLine) -> fitz.Rect | None:
+    artwork = _nearest_artwork_rect(page, item)
+    if artwork is None:
+        return None
+    label = fitz.Rect(*item.source.bbox)
+    label_center_x = (label.x0 + label.x1) / 2
+    horizontally_related = artwork.x0 <= label_center_x <= artwork.x1
+    below = label.y0 >= artwork.y1 - 8
+    if below and horizontally_related:
+        return artwork
+    return None
+
+
 def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
     src = item.source
     x0, _, x1, _ = src.bbox
@@ -141,6 +157,10 @@ def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
         else:
             slot = max(4, page.rect.width - 36 - (artwork.x1 + safe_gap))
         return min(desired, slot) if desired > 0 else slot
+    below_artwork = _diagram_below(page, item)
+    if below_artwork is not None:
+        slot = min(page.rect.width - 72, max(desired, below_artwork.width * 1.35))
+        return max(4, slot)
     if src.role in {"title", "section_title", "subsection_title", "emphasis"}:
         return max(original, available)
     if desired <= available:
@@ -165,7 +185,12 @@ def _label_start_x(
     label = fitz.Rect(*item.source.bbox)
     diagram_side = _diagram_side(page, item)
     if diagram_side is None:
-        return label.x0
+        below_artwork = _diagram_below(page, item)
+        if below_artwork is None:
+            return label.x0
+        label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
+        artwork_center = (below_artwork.x0 + below_artwork.x1) / 2
+        return min(max(36, artwork_center - label_width / 2), page.rect.width - 36 - label_width)
     artwork, side = diagram_side
     label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
     safe_gap = max(14, item.output_font_size * 1.15)
