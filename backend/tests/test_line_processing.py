@@ -84,9 +84,40 @@ def test_fixed_translation_preserves_compact_time_and_count_tokens() -> None:
 
 
 def test_fixed_light_labels_are_compact() -> None:
-    assert fixed_translation_for(_line(0, "Orange Light", (10, 10, 80, 25))) == "オレンジランプ"
+    assert fixed_translation_for(_line(0, "Orange Light", (10, 10, 80, 25))) == "橙ランプ"
     assert fixed_translation_for(_line(0, "Blue Light", (10, 10, 80, 25))) == "ブルーランプ"
     assert fixed_translation_for(_line(0, "Solid Blue", (10, 10, 80, 25))) == "ブルー点灯"
+
+
+def test_fixed_battery_motor_status_labels_are_not_left_to_model() -> None:
+    paragraph = (
+        "Please fully charge the motor for more than 8 hours before the first use. "
+        "Once fully charged, it can be used for 3-6 months depending on the frequency of use."
+    )
+
+    assert fixed_translation_for(_line(0, paragraph, (10, 10, 240, 55))) == (
+        "初回使用前に、モーターを8時間以上フル充電してください。\n"
+        "フル充電後は、使用頻度に応じて3～6か月間使用できます。"
+    )
+    assert fixed_translation_for(_line(1, "Low battery:", (10, 60, 90, 80))) == "バッテリー低下："
+    assert fixed_translation_for(_line(2, "Under Charging:", (10, 85, 120, 105))) == "充電中："
+    assert fixed_translation_for(_line(3, "Fully Charged:", (10, 110, 120, 130))) == "充電済み："
+
+
+def test_merges_split_battery_status_labels() -> None:
+    lines = [
+        _line(0, "Under", (266, 499, 311, 519)),
+        _line(1, "Fully", (439, 499, 473, 519)),
+        _line(2, "Low battery:", (104, 507, 186, 527)),
+        _line(3, "Charging:", (266, 515, 331, 535)),
+        _line(4, "Charged:", (439, 515, 499, 535)),
+    ]
+
+    merged = merge_known_semantic_lines(lines)
+
+    assert [line.text for line in merged] == ["Under Charging:", "Fully Charged:", "Low battery:"]
+    assert fixed_translation_for(merged[0]) == "充電中："
+    assert fixed_translation_for(merged[1]) == "充電済み："
 
 
 def test_merges_and_fixes_quote_gap_check_channel_rows() -> None:

@@ -1,6 +1,8 @@
+import asyncio
+
 import pytest
 
-from app.models import JobRecord, JobStatus, TranslationOptions
+from app.models import GateResult, GateSeverity, JobRecord, JobStatus, TextLine, TranslatedLine, TranslationOptions
 from app.services.jobs import JobStore
 
 
@@ -45,3 +47,52 @@ def test_job_persistence_restores_api_key_without_public_exposure(tmp_path) -> N
     assert restored is not None
     assert restored.options.api_key == "secret-token"
     assert "api_key" not in store.public_dump(restored)["options"]
+
+
+def test_output_repair_does_not_rewrite_fixed_translation(tmp_path) -> None:
+    class RewritingTranslator:
+        called = False
+
+        async def repair_translation(self, line, current_translation, failures, options):
+            self.called = True
+            return "モデルが書き換えた文"
+
+    store = JobStore(tmp_path)
+    source = TextLine(
+        page_index=0,
+        line_index=0,
+        text=(
+            "When received, the blocker prevents the motor receiving signal. "
+            "To activate it, please remove the sleeping blocker. "
+            "If the motor is left idle for over 6 months, please insert the sleeping "
+            "blocker into the charging port to reduce battery consumption."
+        ),
+        bbox=(100, 154, 546, 222),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    fixed = (
+        "受信時、ブロッカーはモーターの信号受信を防ぎます。\n"
+        "使用するには、スリーピングブロッカーを取り外してください。\n"
+        "6か月以上使用しない場合は、バッテリー消費を抑えるため、\n"
+        "ブロッカーを充電ポートに差し込んでください。"
+    )
+    item = TranslatedLine(source=source, translated_text=fixed, output_font_size=14, wrapped_lines=[fixed])
+    gate = GateResult(
+        code="translated_text_overlaps_source_line",
+        severity=GateSeverity.hard_fail,
+        passed=False,
+        page_index=0,
+        message="overlap",
+        details={"text": "受信時"},
+    )
+    translator = RewritingTranslator()
+
+    repaired = asyncio.run(
+        store._repair_output_gate_failures([item], [gate], translator, TranslationOptions(provider="dry_run"))
+    )
+
+    assert repaired == 0
+    assert not translator.called
+    assert item.translated_text == fixed

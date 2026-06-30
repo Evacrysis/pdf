@@ -62,6 +62,12 @@ def test_battery_artwork_text_is_not_localizable() -> None:
     assert not _is_localizable("3V")
 
 
+def test_voltage_current_marks_are_not_localizable() -> None:
+    assert not _is_localizable("5V2A")
+    assert not _is_localizable("5V")
+    assert not _is_localizable("2A")
+
+
 def test_short_bold_codes_are_not_localizable() -> None:
     assert not _is_localizable("S")
     assert not _is_localizable("s x2")
@@ -84,6 +90,21 @@ def test_extract_text_lines_preserves_span_origin(tmp_path: Path) -> None:
     lines = extract_text_lines(str(source))
 
     assert lines[0].origin == (24.0, 64.0)
+
+
+def test_extract_text_lines_sorts_by_visual_position(tmp_path: Path) -> None:
+    source = tmp_path / "visual_order.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=420, height=180)
+    page.insert_text(fitz.Point(50, 110), "Battery Motor", fontsize=24)
+    page.insert_text(fitz.Point(50, 80), "Motor Features", fontsize=36)
+    doc.save(source)
+    doc.close()
+
+    lines = extract_text_lines(str(source))
+
+    assert [line.text for line in lines[:2]] == ["Motor Features", "Battery Motor"]
+    assert [line.line_index for line in lines[:2]] == [0, 1]
 
 
 def test_line_origin_uses_leftmost_span_x_and_dominant_baseline() -> None:

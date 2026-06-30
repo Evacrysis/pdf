@@ -5,7 +5,7 @@ from pathlib import Path
 import fitz
 
 from app.models import TranslatedLine
-from app.services.line_processing import QUOTE_BLANK_RE, QUOTE_GAP_RE
+from app.services.line_processing import QUOTE_BLANK_RE, QUOTE_GAP_RE, fixed_translation_for
 
 DIAGRAM_LABEL_SOURCES = {
     "Knob: Adjust the opening percentage",
@@ -84,13 +84,24 @@ def _wrap_text(text: str, font: fitz.Font, font_size: float, max_width: float) -
         return wrapped
     if font.text_length(text, fontsize=font_size) <= max_width:
         return [text]
+    for marker in ("ランプ", "点灯", "充電済み"):
+        if marker in text and not text.startswith(marker):
+            prefix = text[: text.index(marker)]
+            suffix = text[text.index(marker) :]
+            if prefix and font.text_length(prefix, fontsize=font_size) <= max_width and font.text_length(suffix, fontsize=font_size) <= max_width:
+                return [prefix, suffix]
     parts: list[str] = []
     current = ""
+    line_start_prohibited = set("。、．，」』】）〕］｝・：；ー！？")
     for char in text:
         candidate = current + char
         if current and font.text_length(candidate, fontsize=font_size) > max_width:
-            parts.append(current)
-            current = char
+            if char in line_start_prohibited:
+                parts.append(candidate)
+                current = ""
+            else:
+                parts.append(current)
+                current = char
         else:
             current = candidate
     if current:
@@ -100,6 +111,9 @@ def _wrap_text(text: str, font: fitz.Font, font_size: float, max_width: float) -
 
 def _layout_text(item: TranslatedLine) -> str:
     if _is_quote_gap_line(item.source.text) or _is_source_icon_template_line(item):
+        return item.translated_text
+    fixed_translation = fixed_translation_for(item.source)
+    if fixed_translation is not None and item.translated_text == fixed_translation:
         return item.translated_text
     return " ".join(part.strip() for part in item.translated_text.splitlines() if part.strip())
 
@@ -337,6 +351,44 @@ def _diagram_below(page: fitz.Page, item: TranslatedLine) -> fitz.Rect | None:
     return None
 
 
+def _figure_label_slot(page: fitz.Page, item: TranslatedLine) -> tuple[float, float] | None:
+    if item.source.role != "figure_label":
+        return None
+    label = fitz.Rect(*item.source.bbox)
+    center_x = (label.x0 + label.x1) / 2
+    center_y = (label.y0 + label.y1) / 2
+    left_lines: list[float] = []
+    right_lines: list[float] = []
+    for drawing in page.get_drawings():
+        for raw_item in drawing.get("items", []):
+            if not raw_item or raw_item[0] != "l" or len(raw_item) < 3:
+                continue
+            start, end = raw_item[1], raw_item[2]
+            if abs(start.x - end.x) > 1:
+                continue
+            y0, y1 = sorted((start.y, end.y))
+            if y1 - y0 < 20:
+                continue
+            if not (y0 - 4 <= center_y <= y1 + 4):
+                continue
+            x = float(start.x)
+            if center_x - 90 <= x < center_x:
+                left_lines.append(x)
+            elif center_x < x <= center_x + 90:
+                right_lines.append(x)
+    if not left_lines or not right_lines:
+        return None
+    left = max(left_lines)
+    right = min(right_lines)
+    if right - left < 20:
+        return None
+    # Figure cells in the source often fit English tightly between vertical
+    # rules.  A large artificial padding forces Japanese peer labels to wrap,
+    # which then pushes the following row onto the cell separator.
+    padding = 0.35
+    return left + padding, right - padding
+
+
 def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
     src = item.source
     x0, _, x1, _ = src.bbox
@@ -366,12 +418,15 @@ def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
         if src.role == "emphasis" and original > safe_width * 0.6:
             return max(4, min(original, safe_right - start_x - PAGE_FALLBACK_MARGIN))
         return max(4, min(max(original, available), available))
+    if src.role == "figure_label":
+        slot = _figure_label_slot(page, item)
+        if slot is not None:
+            return max(4, slot[1] - slot[0])
+        return max(4, min(max(original, desired), available, original * 1.5))
     if desired <= available:
         return max(original, desired)
     if src.role == "body" and original >= 90:
         return max(original, min(available, original * 1.8))
-    if src.role == "figure_label":
-        return max(original, min(available, original * 2.4))
     return original
 
 
@@ -380,7 +435,7 @@ def _line_widths(wrapped: list[str], font: fitz.Font, font_size: float) -> list[
 
 
 def _line_step(font_size: float) -> float:
-    return font_size * 1.65
+    return font_size * 1.2
 
 
 def _estimated_text_rect(x: float, baseline: float, width: float, font_size: float) -> fitz.Rect:
@@ -427,6 +482,12 @@ def _label_start_x(
         below_artwork = _diagram_below(page, item)
         if below_artwork is None:
             label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
+            if item.source.role == "figure_label":
+                slot = _figure_label_slot(page, item)
+                if slot is not None:
+                    return _clamp_to_safe_x(page, (slot[0] + slot[1]) / 2 - label_width / 2, label_width)
+                source_center = (label.x0 + label.x1) / 2
+                return _clamp_to_safe_x(page, source_center - label_width / 2, label_width)
             return _clamp_to_safe_x(page, source_x, label_width)
         label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
         artwork_center = (below_artwork.x0 + below_artwork.x1) / 2

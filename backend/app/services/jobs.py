@@ -310,10 +310,11 @@ class JobStore:
             if not failures:
                 continue
             fixed_translation = fixed_translation_for(item.source)
-            if fixed_translation is not None and item.translated_text != fixed_translation:
-                item.translated_text = fixed_translation
-                item.wrapped_lines = []
-                repaired += 1
+            if fixed_translation is not None:
+                if item.translated_text != fixed_translation:
+                    item.translated_text = fixed_translation
+                    item.wrapped_lines = []
+                    repaired += 1
                 continue
             repaired_translation = await translator.repair_translation(
                 item.source,
@@ -349,10 +350,11 @@ class JobStore:
         for item_id, failures in grouped.items():
             item = items_by_id[item_id]
             fixed_translation = fixed_translation_for(item.source)
-            if fixed_translation is not None and item.translated_text != fixed_translation:
-                item.translated_text = fixed_translation
-                item.wrapped_lines = []
-                repaired += 1
+            if fixed_translation is not None:
+                if item.translated_text != fixed_translation:
+                    item.translated_text = fixed_translation
+                    item.wrapped_lines = []
+                    repaired += 1
                 continue
             repaired_translation = await translator.repair_translation(
                 item.source,

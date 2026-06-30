@@ -43,6 +43,8 @@ class RuleEngine:
                 for span in generated:
                     span_rect = fitz.Rect(span["bbox"]) + (0.4, 0.4, 0.4, 0.4)
                     for line_rect in protected_lines:
+                        if _is_descender_bbox_touch(span_rect, line_rect):
+                            continue
                         intersection = span_rect & line_rect
                         if not intersection.is_empty and intersection.get_area() > 1.5:
                             failures.append(
@@ -190,6 +192,7 @@ class RuleEngine:
             "Matter",
             "Shades",
             "Shangri",
+            "Type",
             "Yoolax",
             "Zebra",
         }
@@ -267,13 +270,29 @@ def _meaningful_text_overlap(left: fitz.Rect, right: fitz.Rect, intersection: fi
     return intersection.get_area() > 8
 
 
+def _is_descender_bbox_touch(text_rect: fitz.Rect, line_rect: fitz.Rect) -> bool:
+    if line_rect.height > 3.2:
+        return False
+    intersection = text_rect & line_rect
+    if intersection.is_empty:
+        return False
+    line_y = (line_rect.y0 + line_rect.y1) / 2
+    lower_zone = text_rect.y0 + text_rect.height * 0.72
+    return line_y >= lower_zone and intersection.height <= 3.2
+
+
 def _owned_source_rects(lines: list[TranslatedLine]) -> dict[int, list[fitz.Rect]]:
     owned: dict[int, list[fitz.Rect]] = defaultdict(list)
     excluded_roles = {"title", "section_title", "subsection_title"}
     for item in lines:
         if not item.source.localizable or item.source.role in excluded_roles:
             continue
-        owned[item.source.page_index].append(fitz.Rect(*item.source.bbox) + (-0.8, -0.8, 0.8, 0.8))
+        source_rect = fitz.Rect(*item.source.bbox)
+        vertical_slack = max(1.2, item.source.font_size * 0.7)
+        horizontal_slack = max(0.8, item.source.font_size * 0.08)
+        owned[item.source.page_index].append(
+            source_rect + (-horizontal_slack, -item.source.font_size * 0.18, horizontal_slack, vertical_slack)
+        )
     return owned
 
 
@@ -283,7 +302,7 @@ def _inside_owned_text_region(rect: fitz.Rect, owned_rects: list[fitz.Rect]) -> 
         if owned.contains(center):
             return True
         intersection = rect & owned
-        if not intersection.is_empty and intersection.get_area() / max(1.0, rect.get_area()) > 0.45:
+        if not intersection.is_empty and intersection.get_area() / max(1.0, rect.get_area()) > 0.2:
             return True
     return False
 

@@ -44,6 +44,11 @@ def test_allows_window_covering_product_terms() -> None:
     assert not any(result.code == "english_residue" for result in results)
 
 
+def test_allows_type_c_interface_name() -> None:
+    results = RuleEngine().validate([line("Type-C Cable x1", "Type-Cケーブル ×1")])
+    assert not any(result.code == "english_residue" for result in results)
+
+
 def test_rejects_missing_protected_token() -> None:
     item = line('Press "OK"', "押します。")
     item.source.protected_tokens = ['"OK"']
@@ -131,6 +136,20 @@ def test_output_pdf_gate_ignores_lines_inside_owned_body_source_region(tmp_path:
     _write_pdf_with_generated_text(output, [(40, 82, "テキスト")], draw_source_line=True)
     item = line("source text", "テキスト", role="body")
     item.source.bbox = (20, 68, 220, 92)
+
+    results = RuleEngine().validate_output_pdf(source, output, [item])
+
+    assert not any(result.code == "translated_text_overlaps_source_line" for result in results)
+
+
+def test_output_pdf_gate_ignores_source_lines_touching_body_replacement_band(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "output.pdf"
+    _write_pdf_with_generated_text_and_line(source, [], source_line=(100, 50, 100, 130))
+    _write_pdf_with_generated_text_and_line(output, [(86, 82, "テキスト", 14)], source_line=(100, 50, 100, 130))
+    item = line("source text", "テキスト", role="body")
+    item.source.bbox = (80, 40, 190, 80)
+    item.source.font_size = 14
 
     results = RuleEngine().validate_output_pdf(source, output, [item])
 

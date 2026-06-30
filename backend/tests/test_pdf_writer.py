@@ -227,6 +227,77 @@ def test_wrap_text_keeps_short_labels_on_one_line() -> None:
     assert _wrap_text("チルトベーン", font, 14, 90) == ["チルトベーン"]
 
 
+def test_figure_label_slot_keeps_compact_status_label_on_one_line(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=260, height=180)
+    page.draw_line(fitz.Point(77, 80), fitz.Point(77, 135), color=(0, 0, 0), width=1)
+    page.draw_line(fitz.Point(168, 80), fitz.Point(168, 135), color=(0, 0, 0), width=1)
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    page = doc[0]
+    font = fitz.Font(fontfile=str(font_path))
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Orange Light",
+        bbox=(80.7, 94.2, 158.8, 112.5),
+        origin=(80.7, 108.3),
+        font_name="Helvetica",
+        font_size=12.794599533081055,
+        role="figure_label",
+    )
+    try:
+        item = TranslatedLine(source=line, translated_text="橙ランプ", output_font_size=line.font_size)
+        wrapped = _wrap_text(item.translated_text, font, item.output_font_size, _max_width(page, item, font))
+    finally:
+        doc.close()
+
+    assert wrapped == ["橙ランプ"]
+
+
+def test_wrap_text_does_not_start_line_with_punctuation() -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    font = fitz.Font(fontfile=str(font_path))
+    wrapped = _wrap_text("信号を受信するのを防ぎます。作動させるには取り外してください。", font, 14, 185)
+
+    assert all(not line.startswith("。") for line in wrapped)
+
+
+def test_layout_text_preserves_fixed_translation_line_breaks() -> None:
+    source = TextLine(
+        page_index=0,
+        line_index=0,
+        text=(
+            "When received, the blocker prevents the motor receiving signal. "
+            "To activate it, please remove the sleeping blocker. "
+            "If the motor is left idle for over 6 months, please insert the sleeping "
+            "blocker into the charging port to reduce battery consumption."
+        ),
+        bbox=(100, 154, 546, 222),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    translated = (
+        "受信時、ブロッカーはモーターの信号受信を防ぎます。\n"
+        "使用するには、スリーピングブロッカーを取り外してください。\n"
+        "6か月以上使用しない場合は、バッテリー消費を抑えるため、\n"
+        "ブロッカーを充電ポートに差し込んでください。"
+    )
+
+    assert _layout_text(TranslatedLine(source=source, translated_text=translated, output_font_size=14)) == translated
+
+
 def test_diagram_labels_align_away_from_artwork_lines(tmp_path) -> None:
     font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
     if not font_path.exists():

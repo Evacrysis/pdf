@@ -47,6 +47,8 @@ def _is_localizable(text: str) -> bool:
     stripped = " ".join(text.strip().split())
     if re.fullmatch(r"[\W\d_]+", text):
         return False
+    if re.fullmatch(r"(?:\d+(?:\.\d+)?V(?:\d+(?:\.\d+)?A)?|\d+(?:\.\d+)?A)", stripped, re.IGNORECASE):
+        return False
     if re.fullmatch(r"(?:Lithium Cell|CR\d{4}|3V)", stripped, re.IGNORECASE):
         return False
     if re.fullmatch(r"(?:[124]x|CH\+|CH-|P[12]|OK|A\d+|\d{2}|\d+s|\d+x|GC|EC|on)", stripped, re.IGNORECASE):
@@ -71,7 +73,7 @@ def _classify_roles(lines: list[TextLine]) -> None:
             line.role = "subsection_title"
         elif line.font_size >= body_size + 1.5:
             line.role = "emphasis"
-        elif line.font_size <= body_size - 2:
+        elif line.font_size <= body_size - 1:
             line.role = "figure_label"
         else:
             line.role = "body"
@@ -97,7 +99,7 @@ def extract_text_lines(pdf_path: str) -> list[TextLine]:
                 page_lines.append(
                     TextLine(
                         page_index=page_index,
-                        line_index=len(page_lines),
+                        line_index=0,
                         text=text,
                         bbox=bbox,
                         origin=origin,
@@ -107,6 +109,9 @@ def extract_text_lines(pdf_path: str) -> list[TextLine]:
                         localizable=_is_localizable(text),
                     )
                 )
+        page_lines.sort(key=lambda line: (round(line.bbox[1], 2), round(line.bbox[0], 2)))
+        for index, line in enumerate(page_lines):
+            line.line_index = index
         _classify_roles(page_lines)
         result.extend(page_lines)
     doc.close()
