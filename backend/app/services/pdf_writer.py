@@ -23,6 +23,58 @@ DIAGRAM_LABEL_SOURCES = {
     "Adjust the overlap of stripes",
 }
 
+PAGE_FALLBACK_MARGIN = 36.0
+
+
+def _content_safe_bounds(page: fitz.Page) -> tuple[float, float]:
+    """Return the horizontal visual content frame for the current source page."""
+    page_rect = page.rect
+    page_width = float(page_rect.width)
+    long_rules: list[fitz.Rect] = []
+
+    def add_rule(x0: float, y0: float, x1: float, y1: float) -> None:
+        left = max(float(page_rect.x0), min(float(x0), float(x1)))
+        right = min(float(page_rect.x1), max(float(x0), float(x1)))
+        top = max(float(page_rect.y0), min(float(y0), float(y1)))
+        bottom = min(float(page_rect.y1), max(float(y0), float(y1)))
+        width = right - left
+        height = bottom - top
+        if width < max(220.0, page_width * 0.45):
+            return
+        if width > page_width * 0.92:
+            return
+        if height > 6:
+            return
+        if left < 12 or right > page_width - 12:
+            return
+        if top > page_rect.height * 0.55:
+            return
+        long_rules.append(fitz.Rect(left, top, right, max(bottom, top + 0.1)))
+
+    for drawing in page.get_drawings():
+        rect = drawing.get("rect")
+        if rect:
+            rect = fitz.Rect(rect)
+            add_rule(rect.x0, rect.y0, rect.x1, rect.y1)
+        for item in drawing.get("items", []):
+            if not item or item[0] != "l" or len(item) < 3:
+                continue
+            start, end = item[1], item[2]
+            if abs(start.y - end.y) <= 2:
+                add_rule(start.x, start.y, end.x, end.y)
+
+    if long_rules:
+        best = max(long_rules, key=lambda rect: (rect.width, -rect.y0))
+        return float(best.x0), float(best.x1)
+
+    return PAGE_FALLBACK_MARGIN, page_width - PAGE_FALLBACK_MARGIN
+
+
+def _clamp_to_safe_x(page: fitz.Page, x: float, width: float) -> float:
+    safe_left, safe_right = _content_safe_bounds(page)
+    rightmost = max(safe_left, safe_right - max(0, width))
+    return min(max(x, safe_left), rightmost)
+
 
 def _wrap_text(text: str, font: fitz.Font, font_size: float, max_width: float) -> list[str]:
     if "\n" in text:
@@ -148,8 +200,11 @@ def _diagram_below(page: fitz.Page, item: TranslatedLine) -> fitz.Rect | None:
 def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
     src = item.source
     x0, _, x1, _ = src.bbox
-    original = max(4, x1 - x0)
-    available = max(original, page.rect.width - x0 - 36)
+    safe_left, safe_right = _content_safe_bounds(page)
+    safe_width = max(4, safe_right - safe_left)
+    start_x = min(max(x0, safe_left), safe_right - 4)
+    available = max(4, safe_right - start_x)
+    original = max(4, min(x1 - x0, available))
     desired = max(
         [font.text_length(line, fontsize=item.output_font_size) for line in item.translated_text.splitlines() if line]
         or [0]
@@ -159,18 +214,18 @@ def _max_width(page: fitz.Page, item: TranslatedLine, font: fitz.Font) -> float:
         artwork, side = diagram_side
         safe_gap = max(14, item.output_font_size * 1.15)
         if side == "left":
-            slot = max(4, artwork.x0 - safe_gap - 36)
+            slot = max(4, artwork.x0 - safe_gap - safe_left)
         else:
-            slot = max(4, page.rect.width - 36 - (artwork.x1 + safe_gap))
+            slot = max(4, safe_right - (artwork.x1 + safe_gap))
         return min(desired, slot) if desired > 0 else slot
     below_artwork = _diagram_below(page, item)
     if below_artwork is not None:
-        slot = min(page.rect.width - 72, max(desired, below_artwork.width * 1.35))
+        slot = min(safe_width, max(desired, below_artwork.width * 1.35))
         return max(4, slot)
     if src.role in {"title", "section_title", "subsection_title", "emphasis"}:
-        if src.role == "emphasis" and original > page.rect.width * 0.6:
-            return max(4, min(original, page.rect.width - x0 - 72))
-        return max(original, available)
+        if src.role == "emphasis" and original > safe_width * 0.6:
+            return max(4, min(original, safe_right - start_x - PAGE_FALLBACK_MARGIN))
+        return max(4, min(max(original, available), available))
     if desired <= available:
         return max(original, desired)
     if src.role == "body" and original >= 90:
@@ -192,21 +247,23 @@ def _label_start_x(
 ) -> float:
     label = fitz.Rect(*item.source.bbox)
     source_x = item.source.origin[0] if item.source.origin else label.x0
+    safe_left, safe_right = _content_safe_bounds(page)
     diagram_side = _diagram_side(page, item)
     if diagram_side is None:
         below_artwork = _diagram_below(page, item)
         if below_artwork is None:
-            return source_x
+            label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
+            return _clamp_to_safe_x(page, source_x, label_width)
         label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
         artwork_center = (below_artwork.x0 + below_artwork.x1) / 2
-        return min(max(36, artwork_center - label_width / 2), page.rect.width - 36 - label_width)
+        return _clamp_to_safe_x(page, artwork_center - label_width / 2, label_width)
     artwork, side = diagram_side
     label_width = max(_line_widths(wrapped, font, item.output_font_size) or [label.width])
     safe_gap = max(14, item.output_font_size * 1.15)
     if side == "left":
-        return max(36, artwork.x0 - safe_gap - label_width)
+        return max(safe_left, artwork.x0 - safe_gap - label_width)
     target = artwork.x1 + safe_gap
-    return min(max(target, source_x), page.rect.width - 36 - label_width)
+    return min(max(target, source_x, safe_left), max(safe_left, safe_right - label_width))
 
 
 def _baseline(item: TranslatedLine) -> float:
@@ -248,7 +305,7 @@ def _write_quote_gap_line(
     ]
     total = sum(widths) + sum(icon_widths) + gap * 4
     x0 = item.source.bbox[0]
-    x = min(x0, max(36, page.rect.width - 36 - total))
+    x = _clamp_to_safe_x(page, x0, total)
     icon_top = baseline - icon_height + 2
 
     _insert_text(page, fitz.Point(x, baseline), left_open, font_name, size)

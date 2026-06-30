@@ -4,7 +4,16 @@ import fitz
 import pytest
 
 from app.models import TextLine, TranslatedLine
-from app.services.pdf_writer import _baseline, _label_start_x, _layout_text, _max_width, _redaction_rects, _wrap_text, write_editable_pdf
+from app.services.pdf_writer import (
+    _baseline,
+    _content_safe_bounds,
+    _label_start_x,
+    _layout_text,
+    _max_width,
+    _redaction_rects,
+    _wrap_text,
+    write_editable_pdf,
+)
 
 
 def _make_source_pdf(path: Path) -> None:
@@ -394,3 +403,99 @@ def test_wide_emphasis_paragraph_keeps_right_safety_margin(tmp_path) -> None:
         doc.close()
 
     assert max_width <= 595 - 84.4 - 72
+
+
+def test_content_safe_bounds_uses_source_title_rule(tmp_path) -> None:
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_line(fitz.Point(52, 116), fitz.Point(533, 116), color=(0, 0, 0), width=1)
+    page.draw_line(fitz.Point(20, 760), fitz.Point(592, 760), color=(0, 0, 0), width=1)
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    try:
+        assert _content_safe_bounds(doc[0]) == (52.0, 533.0)
+    finally:
+        doc.close()
+
+
+def test_body_text_width_stays_inside_source_content_frame(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_line(fitz.Point(52, 116), fitz.Point(533, 116), color=(0, 0, 0), width=1)
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    page = doc[0]
+    font = fitz.Font(fontfile=str(font_path))
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="1-9 Channel: One channel corresponds to one blind.",
+        bbox=(390, 140, 570, 160),
+        origin=(390, 155),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    try:
+        item = TranslatedLine(
+            source=line,
+            translated_text="1～9チャンネル：1チャンネルに1台のシェードを登録できます。",
+            output_font_size=14,
+        )
+        max_width = _max_width(page, item, font)
+        wrapped = _wrap_text(item.translated_text, font, 14, max_width)
+        x = _label_start_x(page, item, wrapped, font)
+        widths = [font.text_length(row, fontsize=14) for row in wrapped]
+    finally:
+        doc.close()
+
+    assert max_width <= 533 - 390
+    assert x >= 52
+    assert all(x + width <= 533 for width in widths)
+
+
+def test_right_diagram_label_clamps_to_source_content_frame(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_line(fitz.Point(52, 116), fitz.Point(533, 116), color=(0, 0, 0), width=1)
+    page.draw_circle(fitz.Point(360, 250), 55, color=(0, 0, 0))
+    doc.save(source)
+    doc.close()
+
+    doc = fitz.open(source)
+    page = doc[0]
+    font = fitz.Font(fontfile=str(font_path))
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text="Slight Close",
+        bbox=(470, 238, 592, 258),
+        origin=(470, 253),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+    try:
+        item = TranslatedLine(source=line, translated_text="微閉", output_font_size=14)
+        wrapped = _wrap_text(item.translated_text, font, 14, _max_width(page, item, font))
+        x = _label_start_x(page, item, wrapped, font)
+        width = font.text_length(wrapped[0], fontsize=14)
+    finally:
+        doc.close()
+
+    assert x + width <= 533
