@@ -72,6 +72,11 @@ def test_merges_example_operation_paragraph() -> None:
     )
 
 
+def test_cable_length_uses_metric_only_fixed_translation() -> None:
+    assert fixed_translation_for(_line(0, '118"(3m)', (10, 10, 80, 25))) == "3m"
+    assert fixed_translation_for(_line(0, '78.7"(2m)', (10, 10, 80, 25))) == "2m"
+
+
 def test_continuation_warning_lines_merge_into_one_semantic_block() -> None:
     lines = [
         _warning_line(0, "Congratulations! Remove the sleeping blocker, chooes the channel number", 509.1),

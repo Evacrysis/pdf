@@ -56,6 +56,14 @@ def test_battery_artwork_text_is_not_localizable() -> None:
     assert not _is_localizable("3V")
 
 
+def test_short_bold_codes_are_not_localizable() -> None:
+    assert not _is_localizable("S")
+    assert not _is_localizable("S x2")
+    assert not _is_localizable("A1")
+    assert _is_localizable("Low battery:")
+    assert _is_localizable("Back")
+
+
 def test_extract_text_lines_preserves_span_origin(tmp_path: Path) -> None:
     source = tmp_path / "origin.pdf"
     doc = fitz.open()

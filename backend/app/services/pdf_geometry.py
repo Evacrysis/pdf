@@ -12,6 +12,8 @@ PROTECTED_TOKEN_RE = re.compile(
     r"(?<![A-Za-z0-9])(?:CH\+|CH-|P[12]|OK|A\d+|\d{2}|GC|EC|on|[124]x)(?![A-Za-z0-9])"
 )
 
+PROTECTED_SHORT_CODE_RE = re.compile(r"(?:[A-Z]{1,3}|[A-Z]\s*[xX]\s*\d+|[xX]\s*\d+|[A-Z]\s*[0-9]+)")
+
 
 def _line_text(line: dict) -> str:
     return "".join(span.get("text", "") for span in line.get("spans", [])).strip()
@@ -40,11 +42,14 @@ def _line_origin(line: dict, dominant: dict) -> tuple[float, float] | None:
 def _is_localizable(text: str) -> bool:
     if not text:
         return False
+    stripped = " ".join(text.strip().split())
     if re.fullmatch(r"[\W\d_]+", text):
         return False
-    if re.fullmatch(r"(?:Lithium Cell|CR\d{4}|3V)", text.strip(), re.IGNORECASE):
+    if re.fullmatch(r"(?:Lithium Cell|CR\d{4}|3V)", stripped, re.IGNORECASE):
         return False
-    if re.fullmatch(r"(?:[124]x|CH\+|CH-|P[12]|OK|A\d+|\d{2}|GC|EC|on)", text):
+    if re.fullmatch(r"(?:[124]x|CH\+|CH-|P[12]|OK|A\d+|\d{2}|GC|EC|on)", stripped):
+        return False
+    if PROTECTED_SHORT_CODE_RE.fullmatch(stripped):
         return False
     return bool(re.search(r"[A-Za-z]", text))
 

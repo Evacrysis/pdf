@@ -140,10 +140,14 @@ FIXED_TRANSLATIONS = {
 
 
 QUOTE_GAP_RE = re.compile(r'^Press\s+"[\s\u00a0]*"\s+or\s+"[\s\u00a0]*"\s*$')
+CABLE_LENGTH_RE = re.compile(r'^\d+(?:\.\d+)?\s*(?:"|”|″)\s*\((\d+(?:\.\d+)?m)\)$')
 
 
 def fixed_translation_for(line: TextLine) -> str | None:
     text = _norm(line.text)
     if QUOTE_GAP_RE.match(text):
         return "「□」または「□」を押す"
+    cable_length = CABLE_LENGTH_RE.match(text)
+    if cable_length:
+        return cable_length.group(1)
     return FIXED_TRANSLATIONS.get(text)

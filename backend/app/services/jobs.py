@@ -180,7 +180,9 @@ class JobStore:
             write_editable_pdf(record.source_path, output_path, translated, settings.pdf_font_path)
 
             self._set_progress(record, stage="qa")
-            gates = RuleEngine().validate(translated)
+            rule_engine = RuleEngine()
+            gates = rule_engine.validate(translated)
+            gates.extend(rule_engine.validate_output_pdf(record.source_path, output_path))
             pages: list[PageReport] = []
             page_indexes = sorted({line.source.page_index for line in translated})
             for page_index in page_indexes:

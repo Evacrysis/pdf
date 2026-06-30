@@ -16,6 +16,8 @@ Return only JSON: {"translation":"..."}.
 Rules:
 - Preserve complete source meaning. No omission, no shortening that loses meaning.
 - Protected button/display/icon tokens must remain unchanged in Japanese brackets when appropriate.
+- Bold short codes and accessory/specification tokens such as S, S x2, A1, OK, P1, P2 are protected; do not translate them.
+- Cable length labels like 118"(3m) or 78.7"(2m) should use the metric value only, for example 3m or 2m.
 - Do not translate device/accessory printed English or protected display values.
 - Translate ordinary command button words into Japanese, for example "Open" -> "開", "Close" -> "閉",
   "Stop" -> "停止", "Favorite Position" -> "お気に入り位置".

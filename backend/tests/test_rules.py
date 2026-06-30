@@ -1,4 +1,8 @@
 from typing import Optional
+from pathlib import Path
+
+import fitz
+import pytest
 
 from app.models import JobRecord, JobStatus, TextLine, TranslatedLine, TranslationOptions
 from app.services.rules import RuleEngine
@@ -72,6 +76,43 @@ def test_rejects_empty_icon_brackets_for_quote_gap_source() -> None:
     results = RuleEngine().validate([line('Press "    " or "    "', "「」または「」を押す")])
 
     assert any(result.code == "empty_protected_icon_bracket" for result in results)
+
+
+def _write_pdf_with_generated_text(path: Path, lines: list[tuple[float, float, str]], draw_source_line: bool = False) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+    doc = fitz.open()
+    page = doc.new_page(width=240, height=160)
+    if draw_source_line:
+        page.draw_line(fitz.Point(20, 80), fitz.Point(220, 80), color=(0, 0, 0), width=1)
+    page.insert_font(fontname="F0", fontfile=str(font_path))
+    for x, y, text in lines:
+        page.insert_text(fitz.Point(x, y), text, fontname="F0", fontsize=14, color=(0, 0, 0))
+    doc.save(path)
+    doc.close()
+
+
+def test_output_pdf_gate_rejects_translated_text_over_source_line(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "output.pdf"
+    _write_pdf_with_generated_text(source, [], draw_source_line=True)
+    _write_pdf_with_generated_text(output, [(40, 82, "テキスト")], draw_source_line=True)
+
+    results = RuleEngine().validate_output_pdf(source, output)
+
+    assert any(result.code == "translated_text_overlaps_source_line" for result in results)
+
+
+def test_output_pdf_gate_rejects_overlapping_translated_lines(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "output.pdf"
+    _write_pdf_with_generated_text(source, [])
+    _write_pdf_with_generated_text(output, [(40, 80, "一行目"), (40, 84, "二行目")])
+
+    results = RuleEngine().validate_output_pdf(source, output)
+
+    assert any(result.code == "translated_text_line_overlap" for result in results)
 
 
 def test_api_key_is_not_serialized() -> None:

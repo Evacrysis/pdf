@@ -239,6 +239,10 @@ def _line_widths(wrapped: list[str], font: fitz.Font, font_size: float) -> list[
     return [font.text_length(line, fontsize=font_size) for line in wrapped]
 
 
+def _line_step(font_size: float) -> float:
+    return font_size * 1.5
+
+
 def _label_start_x(
     page: fitz.Page,
     item: TranslatedLine,
@@ -375,7 +379,7 @@ def write_editable_pdf(
             max_width = _max_width(page, item, font)
             wrapped = _wrap_text(layout_text, font, item.output_font_size, max_width)
             item.wrapped_lines = wrapped
-            line_step = item.output_font_size * 1.35
+            line_step = _line_step(item.output_font_size)
             baseline = _baseline(item)
             x = _label_start_x(page, item, wrapped, font)
             for offset, text in enumerate(wrapped):
