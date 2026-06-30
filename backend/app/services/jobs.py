@@ -11,13 +11,55 @@ import fitz
 from fastapi import UploadFile
 
 from app.config import settings
-from app.models import JobRecord, JobStatus, PageReport, TranslatedLine, TranslationOptions
+from app.models import GateResult, JobRecord, JobStatus, PageReport, TranslatedLine, TranslationOptions
 from app.services.pdf_geometry import extract_text_lines
 from app.services.pdf_writer import write_editable_pdf
 from app.services.line_processing import fixed_translation_for, merge_known_semantic_lines
 from app.services.rules import RuleEngine
 from app.services.translation_memory import TranslationMemory
 from app.services.translator import get_translator
+
+
+MAX_REPAIR_PASSES = 2
+REPAIRABLE_TEXT_GATE_CODES = {
+    "protected_token_missing",
+    "english_residue",
+    "fixed_translation_mismatch",
+    "empty_protected_icon_bracket",
+}
+REPAIRABLE_OUTPUT_GATE_CODES = {
+    "translated_text_line_overlap",
+    "translated_text_overlaps_source_line",
+}
+
+
+def _gate_payload(gate: GateResult) -> dict:
+    return {
+        "code": gate.code,
+        "message": gate.message,
+        "page_index": gate.page_index,
+        "line_index": gate.line_index,
+        "details": gate.details,
+    }
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _matching_translated_line(translated: list[TranslatedLine], page_index: int | None, text: str | None) -> TranslatedLine | None:
+    if page_index is None or not text:
+        return None
+    needle = _normalize_text(text)
+    if not needle:
+        return None
+    for item in translated:
+        if item.source.page_index != page_index:
+            continue
+        candidates = [item.translated_text, *item.wrapped_lines]
+        if any(needle in _normalize_text(candidate) or _normalize_text(candidate) in needle for candidate in candidates):
+            return item
+    return None
 
 
 class JobStore:
@@ -175,14 +217,42 @@ class JobStore:
                 )
                 await asyncio.sleep(0)
 
-            self._set_progress(record, stage="writing_pdf")
             output_path = self.root / job_id / "translated.pdf"
-            write_editable_pdf(record.source_path, output_path, translated, settings.pdf_font_path)
 
-            self._set_progress(record, stage="qa")
             rule_engine = RuleEngine()
-            gates = rule_engine.validate(translated)
-            gates.extend(rule_engine.validate_output_pdf(record.source_path, output_path))
+            gates: list[GateResult] = []
+            for repair_pass in range(MAX_REPAIR_PASSES + 1):
+                self._set_progress(record, stage="qa" if repair_pass == 0 else f"repairing_pass_{repair_pass}")
+                text_gates = rule_engine.validate(translated)
+                if repair_pass < MAX_REPAIR_PASSES:
+                    repaired_text = await self._repair_text_gate_failures(
+                        translated,
+                        text_gates,
+                        translator,
+                        record.options,
+                    )
+                    if repaired_text:
+                        continue
+
+                self._set_progress(record, stage="writing_pdf")
+                write_editable_pdf(record.source_path, output_path, translated, settings.pdf_font_path)
+
+                self._set_progress(record, stage="qa")
+                output_gates = rule_engine.validate_output_pdf(record.source_path, output_path, translated)
+                gates = [*text_gates, *output_gates]
+                hard_failures = [gate for gate in gates if gate.severity == "hard_fail"]
+                if not hard_failures:
+                    break
+                if repair_pass < MAX_REPAIR_PASSES:
+                    repaired_output = await self._repair_output_gate_failures(
+                        translated,
+                        output_gates,
+                        translator,
+                        record.options,
+                    )
+                    if repaired_output:
+                        continue
+                break
             pages: list[PageReport] = []
             page_indexes = sorted({line.source.page_index for line in translated})
             for page_index in page_indexes:
@@ -218,6 +288,83 @@ class JobStore:
             record.stage = "failed"
             record.errors.append(str(exc))
         self._persist(record)
+
+    async def _repair_text_gate_failures(
+        self,
+        translated: list[TranslatedLine],
+        gates: list[GateResult],
+        translator,
+        options: TranslationOptions,
+    ) -> int:
+        grouped: dict[tuple[int, int], list[GateResult]] = {}
+        for gate in gates:
+            if gate.severity != "hard_fail" or gate.code not in REPAIRABLE_TEXT_GATE_CODES:
+                continue
+            if gate.page_index is None or gate.line_index is None:
+                continue
+            grouped.setdefault((gate.page_index, gate.line_index), []).append(gate)
+
+        repaired = 0
+        for item in translated:
+            failures = grouped.get((item.source.page_index, item.source.line_index))
+            if not failures:
+                continue
+            fixed_translation = fixed_translation_for(item.source)
+            if fixed_translation is not None and item.translated_text != fixed_translation:
+                item.translated_text = fixed_translation
+                item.wrapped_lines = []
+                repaired += 1
+                continue
+            repaired_translation = await translator.repair_translation(
+                item.source,
+                item.translated_text,
+                [_gate_payload(gate) for gate in failures],
+                options,
+            )
+            if repaired_translation and repaired_translation != item.translated_text:
+                item.translated_text = repaired_translation
+                item.wrapped_lines = []
+                repaired += 1
+        return repaired
+
+    async def _repair_output_gate_failures(
+        self,
+        translated: list[TranslatedLine],
+        gates: list[GateResult],
+        translator,
+        options: TranslationOptions,
+    ) -> int:
+        grouped: dict[int, list[GateResult]] = {}
+        for gate in gates:
+            if gate.severity != "hard_fail" or gate.code not in REPAIRABLE_OUTPUT_GATE_CODES:
+                continue
+            text = gate.details.get("text") or gate.details.get("first") or gate.details.get("second")
+            item = _matching_translated_line(translated, gate.page_index, text)
+            if item is None:
+                continue
+            grouped.setdefault(id(item), []).append(gate)
+
+        repaired = 0
+        items_by_id = {id(item): item for item in translated}
+        for item_id, failures in grouped.items():
+            item = items_by_id[item_id]
+            fixed_translation = fixed_translation_for(item.source)
+            if fixed_translation is not None and item.translated_text != fixed_translation:
+                item.translated_text = fixed_translation
+                item.wrapped_lines = []
+                repaired += 1
+                continue
+            repaired_translation = await translator.repair_translation(
+                item.source,
+                item.translated_text,
+                [_gate_payload(gate) for gate in failures],
+                options,
+            )
+            if repaired_translation and repaired_translation != item.translated_text:
+                item.translated_text = repaired_translation
+                item.wrapped_lines = []
+                repaired += 1
+        return repaired
 
 
 job_store = JobStore(settings.storage_dir / "jobs")

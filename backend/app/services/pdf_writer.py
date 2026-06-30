@@ -5,7 +5,7 @@ from pathlib import Path
 import fitz
 
 from app.models import TranslatedLine
-from app.services.line_processing import QUOTE_GAP_RE
+from app.services.line_processing import QUOTE_BLANK_RE, QUOTE_GAP_RE
 
 DIAGRAM_LABEL_SOURCES = {
     "Knob: Adjust the opening percentage",
@@ -99,7 +99,7 @@ def _wrap_text(text: str, font: fitz.Font, font_size: float, max_width: float) -
 
 
 def _layout_text(item: TranslatedLine) -> str:
-    if _is_quote_gap_line(item.source.text):
+    if _is_quote_gap_line(item.source.text) or _is_source_icon_template_line(item):
         return item.translated_text
     return " ".join(part.strip() for part in item.translated_text.splitlines() if part.strip())
 
@@ -108,23 +108,163 @@ def _is_quote_gap_line(text: str) -> bool:
     return bool(QUOTE_GAP_RE.match(" ".join(text.split())))
 
 
-def _icon_gap_rects(page: fitz.Page, bbox: tuple[float, float, float, float]) -> list[fitz.Rect]:
+def _is_source_icon_template_line(item: TranslatedLine) -> bool:
+    return "□" in item.translated_text and bool(QUOTE_BLANK_RE.search(item.source.text))
+
+
+def _placeholder_count(text: str) -> int:
+    return text.count("□")
+
+
+def _cluster_icon_rects(rects: list[fitz.Rect]) -> list[fitz.Rect]:
+    clusters: list[fitz.Rect] = []
+    for rect in sorted(rects, key=lambda item: (item.x0, item.y0)):
+        matched = False
+        center = fitz.Point((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2)
+        for index, existing in enumerate(clusters):
+            existing_center = fitz.Point((existing.x0 + existing.x1) / 2, (existing.y0 + existing.y1) / 2)
+            if abs(center.x - existing_center.x) <= 5 and abs(center.y - existing_center.y) <= 5:
+                clusters[index] = existing | rect
+                matched = True
+                break
+        if not matched:
+            clusters.append(fitz.Rect(rect))
+    return clusters
+
+
+def _normalized_quote_key(text: str) -> str:
+    return QUOTE_BLANK_RE.sub('"□"', " ".join(text.split()))
+
+
+def _raw_line_text(line: dict) -> str:
+    return "".join("".join(char.get("c", "") for char in span.get("chars", [])) for span in line.get("spans", []))
+
+
+def _raw_line_chars(line: dict) -> list[dict]:
+    chars: list[dict] = []
+    for span in line.get("spans", []):
+        chars.extend(span.get("chars", []))
+    return chars
+
+
+def _quote_blank_rects(page: fitz.Page, text: str, bbox: tuple[float, float, float, float], font_size: float) -> list[fitz.Rect]:
+    source_key = _normalized_quote_key(text)
+    if not source_key:
+        return []
     source_rect = fitz.Rect(*bbox)
+    search_rect = source_rect + (-3, -3, 3, 3)
+    rects: list[fitz.Rect] = []
+    for block in page.get_text("rawdict").get("blocks", []):
+        for line in block.get("lines", []):
+            line_bbox = fitz.Rect(line.get("bbox", (0, 0, 0, 0)))
+            if not search_rect.intersects(line_bbox):
+                continue
+            if abs(line_bbox.y0 - source_rect.y0) > max(4.0, font_size * 0.6):
+                continue
+            line_text = _raw_line_text(line)
+            line_key = _normalized_quote_key(line_text)
+            if '"□"' not in line_key:
+                continue
+            if line_key and not (source_key.startswith(line_key.strip()) or line_key.startswith(source_key.strip())):
+                continue
+            chars = _raw_line_chars(line)
+            index = 0
+            while index < len(chars):
+                if chars[index].get("c") != '"':
+                    index += 1
+                    continue
+                end = index + 1
+                while end < len(chars) and chars[end].get("c") != '"':
+                    end += 1
+                if end >= len(chars):
+                    break
+                inner = chars[index + 1 : end]
+                if inner and all(char.get("c", "").isspace() or char.get("c") == "\u00a0" for char in inner):
+                    opening = fitz.Rect(chars[index].get("bbox"))
+                    closing = fitz.Rect(chars[end].get("bbox"))
+                    x0 = opening.x1
+                    x1 = closing.x0
+                    if x1 <= x0:
+                        center = (opening.x1 + closing.x0) / 2
+                        x0 = center - max(1.0, font_size * 0.18)
+                        x1 = center + max(1.0, font_size * 0.18)
+                    rects.append(fitz.Rect(x0, line_bbox.y0, x1, line_bbox.y1))
+                index = end + 1
+    if rects:
+        return rects
+
+    normalized = " ".join(text.split())
+    if not normalized:
+        return []
+    row_height = min(source_rect.height, font_size * 1.8)
+    for match in QUOTE_BLANK_RE.finditer(normalized):
+        x0 = source_rect.x0 + source_rect.width * (match.start() / len(normalized))
+        x1 = source_rect.x0 + source_rect.width * (match.end() / len(normalized))
+        rects.append(fitz.Rect(x0, source_rect.y0, x1, source_rect.y0 + row_height))
+    return rects
+
+
+def _drawing_icon_candidates(page: fitz.Page, search_rect: fitz.Rect) -> list[fitz.Rect]:
     candidates: list[fitz.Rect] = []
     for drawing in page.get_drawings():
         rect = drawing.get("rect")
         if not rect:
             continue
-        if rect.x0 < source_rect.x0 or rect.x1 > source_rect.x1:
-            continue
-        if rect.y1 < source_rect.y0 - 4 or rect.y0 > source_rect.y1 + 4:
+        rect = fitz.Rect(rect)
+        if not search_rect.intersects(rect):
             continue
         width = rect.width
         height = rect.height
-        if 6 <= width <= 22 and 6 <= height <= 22:
-            candidates.append(fitz.Rect(rect))
-    candidates.sort(key=lambda rect: rect.x0)
-    return candidates[:2]
+        if 2 <= width <= 28 and 2 <= height <= 28:
+            candidates.append(rect)
+    return candidates
+
+
+def _source_icon_rect_for_quote(page: fitz.Page, quote_rect: fitz.Rect, font_size: float) -> fitz.Rect | None:
+    search_rect = quote_rect + (-2, -5, 2, 5)
+    candidates = []
+    for rect in _drawing_icon_candidates(page, search_rect):
+        center_y = (rect.y0 + rect.y1) / 2
+        horizontal_overlap = max(0.0, min(rect.x1, search_rect.x1) - max(rect.x0, search_rect.x0))
+        required_overlap = min(rect.width, quote_rect.width) * 0.25
+        if search_rect.y0 <= center_y <= search_rect.y1 and horizontal_overlap >= required_overlap:
+            candidates.append(rect)
+    if not candidates:
+        return None
+    icon_rect = fitz.Rect(candidates[0])
+    for rect in candidates[1:]:
+        icon_rect |= rect
+    max_width = max(2.0, quote_rect.width + font_size * 0.65)
+    max_height = max(2.0, quote_rect.height + font_size * 0.35)
+    if icon_rect.width > max_width or icon_rect.height > max_height:
+        return None
+    return icon_rect
+
+
+def _icon_gap_rects(
+    page: fitz.Page,
+    bbox: tuple[float, float, float, float],
+    needed: int = 2,
+    source_text: str = "",
+    font_size: float = 14,
+) -> list[fitz.Rect]:
+    source_rect = fitz.Rect(*bbox)
+    quote_rects = _quote_blank_rects(page, source_text, bbox, font_size)
+    if quote_rects:
+        selected: list[fitz.Rect] = []
+        for quote_rect in quote_rects[:needed]:
+            icon_rect = _source_icon_rect_for_quote(page, quote_rect, font_size)
+            if icon_rect is not None:
+                selected.append(icon_rect)
+        if len(selected) >= needed:
+            selected.sort(key=lambda rect: rect.x0)
+            return selected[:needed]
+        return []
+
+    expanded = source_rect + (-8, -14, 8, 14)
+    clustered = _cluster_icon_rects(_drawing_icon_candidates(page, expanded))
+    clustered.sort(key=lambda rect: rect.x0)
+    return clustered[:needed]
 
 
 def _redaction_rects(page: fitz.Page, item: TranslatedLine) -> list[fitz.Rect]:
@@ -321,10 +461,10 @@ def _write_quote_gap_line(
     font: fitz.Font,
     font_name: str,
     icon_streams: list[tuple[fitz.Rect, bytes]],
+    placed_rows: list[fitz.Rect],
 ) -> bool:
     if len(icon_streams) < 2:
         return False
-    baseline = _baseline(item)
     size = item.output_font_size
     left_open = "「"
     middle = "」または「"
@@ -340,6 +480,7 @@ def _write_quote_gap_line(
     total = sum(widths) + sum(icon_widths) + gap * 4
     x0 = item.source.bbox[0]
     x = _clamp_to_safe_x(page, x0, total)
+    baseline = _avoid_generated_overlap(x, total, _baseline(item), size, placed_rows)
     icon_top = baseline - icon_height + 2
 
     _insert_text(page, fitz.Point(x, baseline), left_open, font_name, size)
@@ -352,6 +493,101 @@ def _write_quote_gap_line(
     x += icon_widths[1] + gap
     _insert_text(page, fitz.Point(x, baseline), tail, font_name, size)
     item.wrapped_lines = ["「source-icon」または「source-icon」を押す"]
+    placed_rows.append(_estimated_text_rect(x, baseline, total, size))
+    return True
+
+
+def _draw_template_line(
+    page: fitz.Page,
+    x: float,
+    baseline: float,
+    template: str,
+    font: fitz.Font,
+    font_name: str,
+    font_size: float,
+    icon_streams: list[tuple[fitz.Rect, bytes]],
+) -> int:
+    parts = template.split("□")
+    cursor = x
+    used_icons = 0
+    gap = 1.2
+    for index, part in enumerate(parts):
+        if part:
+            _insert_text(page, fitz.Point(cursor, baseline), part, font_name, font_size)
+            cursor += font.text_length(part, fontsize=font_size)
+        if index < len(parts) - 1:
+            rect, stream = icon_streams[used_icons]
+            icon_width = max(2.0, rect.width)
+            icon_height = max(2.0, rect.height)
+            icon_top = baseline - icon_height * 0.82
+            page.insert_image(
+                fitz.Rect(cursor + gap, icon_top, cursor + gap + icon_width, icon_top + icon_height),
+                stream=stream,
+                overlay=True,
+            )
+            cursor += icon_width + gap * 2
+            used_icons += 1
+    return used_icons
+
+
+def _template_line_width(
+    template: str,
+    font: fitz.Font,
+    font_size: float,
+    icon_rects: list[fitz.Rect],
+) -> float:
+    parts = template.split("□")
+    text_width = sum(font.text_length(part, fontsize=font_size) for part in parts)
+    icon_width = sum(icon_rects[index].width for index in range(min(len(icon_rects), len(parts) - 1)))
+    gap_width = max(0, len(parts) - 1) * 2.4
+    return text_width + icon_width + gap_width
+
+
+def _write_source_icon_template_line(
+    page: fitz.Page,
+    item: TranslatedLine,
+    font: fitz.Font,
+    font_name: str,
+    icon_streams: list[tuple[fitz.Rect, bytes]],
+    placed_rows: list[fitz.Rect],
+) -> bool:
+    needed = _placeholder_count(item.translated_text)
+    if needed == 0:
+        return False
+    if len(icon_streams) < needed:
+        return False
+
+    lines = [line for line in item.translated_text.splitlines() if line.strip()]
+    baseline = _baseline(item)
+    size = item.output_font_size
+    line_step = _line_step(size)
+    icon_index = 0
+    rendered: list[str] = []
+    base_adjustment = 0.0
+    for offset, template in enumerate(lines):
+        count = _placeholder_count(template)
+        current_icons = icon_streams[icon_index : icon_index + count]
+        width = _template_line_width(template, font, size, [rect for rect, _ in current_icons])
+        x = _clamp_to_safe_x(page, item.source.bbox[0], width)
+        desired_baseline = baseline + base_adjustment + offset * line_step
+        row_baseline = _avoid_generated_overlap(x, width, desired_baseline, size, placed_rows)
+        if offset == 0:
+            base_adjustment = row_baseline - baseline
+        used = _draw_template_line(
+            page,
+            x,
+            row_baseline,
+            template,
+            font,
+            font_name,
+            size,
+            current_icons,
+        )
+        icon_index += used
+        rendered.append(template.replace("□", "source-icon"))
+        if template:
+            placed_rows.append(_estimated_text_rect(x, row_baseline, width, size))
+    item.wrapped_lines = rendered
     return True
 
 
@@ -383,9 +619,10 @@ def write_editable_pdf(
             src = item.source
             if not src.localizable:
                 continue
-            if _is_quote_gap_line(src.text):
+            if _is_quote_gap_line(src.text) or _is_source_icon_template_line(item):
                 streams: list[tuple[fitz.Rect, bytes]] = []
-                for rect in _icon_gap_rects(page, src.bbox):
+                needed = max(2 if _is_quote_gap_line(src.text) else 0, _placeholder_count(item.translated_text))
+                for rect in _icon_gap_rects(page, src.bbox, needed=needed, source_text=src.text, font_size=src.font_size):
                     pix = page.get_pixmap(matrix=fitz.Matrix(4, 4), clip=fitz.Rect(rect), alpha=False)
                     streams.append((fitz.Rect(rect), pix.tobytes("png")))
                 quote_icon_streams[id(item)] = streams
@@ -400,8 +637,14 @@ def write_editable_pdf(
             src = item.source
             if not src.localizable:
                 continue
+            if _is_source_icon_template_line(item):
+                if not _write_source_icon_template_line(page, item, font, font_name, quote_icon_streams.get(id(item), []), placed_rows):
+                    raise RuntimeError(
+                        f"Protected source icons could not be located for source-icon template line on page {src.page_index + 1}."
+                    )
+                continue
             if _is_quote_gap_line(src.text):
-                if not _write_quote_gap_line(page, item, font, font_name, quote_icon_streams.get(id(item), [])):
+                if not _write_quote_gap_line(page, item, font, font_name, quote_icon_streams.get(id(item), []), placed_rows):
                     raise RuntimeError(
                         f"Protected source icons could not be located for quote-gap line on page {src.page_index + 1}."
                     )

@@ -96,6 +96,25 @@ def merge_known_semantic_lines(lines: list[TextLine]) -> list[TextLine]:
             i += 3
             continue
 
+        if (
+            len(texts) >= 2
+            and re.match(r'^Press\s+"[\s\u00a0]*"\s+or\s+"[\s\u00a0]*",?$', texts[0])
+            and texts[1] in {"check channel.", "check group."}
+        ):
+            result.append(_merge(same_page, 2, f"{texts[0]} {texts[1]}"))
+            i += 2
+            continue
+
+        if (
+            len(texts) >= 3
+            and texts[0].startswith('Press " " or " ", choose the channel')
+            and texts[1] == "will flash."
+            and texts[2].startswith("Choose the channel number you want to add")
+        ):
+            result.append(_merge(same_page, 3, " ".join(texts[:3])))
+            i += 3
+            continue
+
         if len(texts) >= 2 and texts[0].startswith("Only when Shangri-la Shades reach") and texts[1].startswith("can slats be adjusted"):
             result.append(_merge(same_page, 2, "Only when Shangri-la Shades reach the bottom limit can slats be adjusted."))
             i += 2
@@ -143,16 +162,48 @@ FIXED_TRANSLATIONS = {
 }
 
 
+QUOTE_BLANK_RE = re.compile(r'"[\s\u00a0]*"')
 QUOTE_GAP_RE = re.compile(r'^Press\s+"[\s\u00a0]*"\s+or\s+"[\s\u00a0]*"\s*$')
 CABLE_LENGTH_RE = re.compile(r'^\d+(?:\.\d+)?\s*(?:"|”|″|ˮ)\s*\((\d+(?:\.\d+)?m)\)$')
 HOLD_FOR_TIME_RE = re.compile(r"^Hold for (\d+s)$", re.IGNORECASE)
 BLIND_JOGS_COUNT_RE = re.compile(r"^Blind jogs (\d+x)$", re.IGNORECASE)
 
 
+def quote_blank_key(text: str) -> str:
+    return _norm(QUOTE_BLANK_RE.sub('"□"', text))
+
+
 def fixed_translation_for(line: TextLine) -> str | None:
     text = _norm(line.text)
+    quote_key = quote_blank_key(text)
     if QUOTE_GAP_RE.match(text):
         return "「□」または「□」を押す"
+    if quote_key == 'Press "□"':
+        return "「□」を押す"
+    if quote_key == 'Press "□" or "□", check channel.':
+        return "「□」または「□」を押す\nチャンネル確認"
+    if quote_key == 'Press "□" or "□", check group.':
+        return "「□」または「□」を押す\nグループ確認"
+    hold_gap = re.match(r'^Hold "□" for\s+(\d+s)$', quote_key, re.IGNORECASE)
+    if hold_gap:
+        return f"「□」を{hold_gap.group(1)}押し続ける"
+    hold_gap_exit = re.match(r'^Hold "□" for\s+(\d+s) to exit clock setting\.$', quote_key, re.IGNORECASE)
+    if hold_gap_exit:
+        return f"「□」を{hold_gap_exit.group(1)}押し続け、時計設定を終了します。"
+    if quote_key == 'Press "□" to select other channel numbers.':
+        return "「□」を押して他のチャンネル番号を選択します。"
+    if quote_key == 'Please ensure your remote is in setting mode ("□" shows up). If not, please refer to page 19.':
+        return "リモコンが設定モードになっていることを確認してください。\n（「□」が表示されます）\n設定モードでない場合は19ページを参照してください。"
+    if quote_key == 'Please ensure your remote is not in setting mode ("□" is not shows up). If not, please refer to page 19 to exit setting mode.':
+        return "リモコンが設定モードになっていないことを確認してください。\n（「□」が表示されていない状態）\n設定モードの場合は19ページを参照して終了してください。"
+    if quote_key.startswith('Press "□" or "□", choose the channel number you want to cancel.'):
+        return (
+            "「□」または「□」を押し、\n"
+            "キャンセルしたいチャンネル番号を選択します。\n"
+            "「OK」を押すとキャンセルされ、この番号が点滅します。\n"
+            "追加したいチャンネル番号を選択します。\n"
+            "「OK」を押すと確定され、この番号は点滅しません。"
+        )
     cable_length = CABLE_LENGTH_RE.match(text)
     if cable_length:
         return cable_length.group(1)

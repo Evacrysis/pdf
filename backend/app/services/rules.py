@@ -25,15 +25,21 @@ class RuleEngine:
         results.extend(self._no_empty_protected_icon_brackets(lines))
         return results
 
-    def validate_output_pdf(self, source_pdf: Path, output_pdf: Path) -> list[GateResult]:
+    def validate_output_pdf(
+        self,
+        source_pdf: Path,
+        output_pdf: Path,
+        translated_lines: list[TranslatedLine] | None = None,
+    ) -> list[GateResult]:
         failures: list[GateResult] = []
+        owned_rects = _owned_source_rects(translated_lines or [])
         source_doc = fitz.open(source_pdf)
         output_doc = fitz.open(output_pdf)
         try:
             for page_index in range(min(source_doc.page_count, output_doc.page_count)):
                 generated = _generated_text_spans(output_doc[page_index])
                 failures.extend(_text_line_overlap_failures(page_index, generated))
-                protected_lines = _source_drawing_lines(source_doc[page_index])
+                protected_lines = _source_drawing_lines(source_doc[page_index], owned_rects.get(page_index, []))
                 for span in generated:
                     span_rect = fitz.Rect(span["bbox"]) + (0.4, 0.4, 0.4, 0.4)
                     for line_rect in protected_lines:
@@ -261,8 +267,30 @@ def _meaningful_text_overlap(left: fitz.Rect, right: fitz.Rect, intersection: fi
     return intersection.get_area() > 8
 
 
-def _source_drawing_lines(page: fitz.Page) -> list[fitz.Rect]:
+def _owned_source_rects(lines: list[TranslatedLine]) -> dict[int, list[fitz.Rect]]:
+    owned: dict[int, list[fitz.Rect]] = defaultdict(list)
+    excluded_roles = {"title", "section_title", "subsection_title"}
+    for item in lines:
+        if not item.source.localizable or item.source.role in excluded_roles:
+            continue
+        owned[item.source.page_index].append(fitz.Rect(*item.source.bbox) + (-0.8, -0.8, 0.8, 0.8))
+    return owned
+
+
+def _inside_owned_text_region(rect: fitz.Rect, owned_rects: list[fitz.Rect]) -> bool:
+    center = fitz.Point((rect.x0 + rect.x1) / 2, (rect.y0 + rect.y1) / 2)
+    for owned in owned_rects:
+        if owned.contains(center):
+            return True
+        intersection = rect & owned
+        if not intersection.is_empty and intersection.get_area() / max(1.0, rect.get_area()) > 0.45:
+            return True
+    return False
+
+
+def _source_drawing_lines(page: fitz.Page, owned_rects: list[fitz.Rect] | None = None) -> list[fitz.Rect]:
     page_rect = page.rect
+    owned_rects = owned_rects or []
     lines: list[fitz.Rect] = []
     for drawing in page.get_drawings():
         width = max(float(drawing.get("width") or 1.0), 1.0)
@@ -278,5 +306,7 @@ def _source_drawing_lines(page: fitz.Page) -> list[fitz.Rect]:
                 rect = fitz.Rect(start, end).normalize() + (-pad, -pad, pad, pad)
                 clipped = rect & page_rect
                 if not clipped.is_empty and (clipped.width >= 8 or clipped.height >= 8):
+                    if _inside_owned_text_region(clipped, owned_rects):
+                        continue
                     lines.append(clipped)
     return lines

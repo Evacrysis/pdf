@@ -26,6 +26,18 @@ Rules:
 """
 
 
+REPAIR_SYSTEM_PROMPT = """You repair a Japanese PDF manual translation after automated layout/quality gates failed.
+Return only JSON: {"translation":"..."}.
+Rules:
+- Preserve complete source meaning. Do not omit timing, buttons, conditions, warnings, examples, or results.
+- Keep protected tokens and source-icon placeholders exactly as provided.
+- If the source uses blank quoted button/icon slots, keep each slot as □ inside Japanese brackets, for example 「□」.
+- Make the Japanese concise enough for the provided layout issue, but do not shrink meaning.
+- Prefer natural line breaks using \\n only when they improve layout or avoid overlap.
+- Do not return explanations, markdown, or any key other than translation.
+"""
+
+
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
@@ -63,6 +75,15 @@ class Translator(ABC):
     @abstractmethod
     async def translate_line(self, line: TextLine, options: TranslationOptions) -> str:
         raise NotImplementedError
+
+    async def repair_translation(
+        self,
+        line: TextLine,
+        current_translation: str,
+        failures: list[dict],
+        options: TranslationOptions,
+    ) -> str:
+        return current_translation
 
 
 class OpenAICompatibleTranslator(Translator):
@@ -161,6 +182,64 @@ class OpenAICompatibleTranslator(Translator):
             content = body["choices"][0]["message"]["content"].strip()
         except (KeyError, IndexError, TypeError):
             raise RuntimeError(f"Model API response missing choices[0].message.content: {body}") from None
+        try:
+            parsed = json.loads(content)
+            return str(parsed["translation"]).strip()
+        except Exception:
+            return content.strip()
+
+    async def repair_translation(
+        self,
+        line: TextLine,
+        current_translation: str,
+        failures: list[dict],
+        options: TranslationOptions,
+    ) -> str:
+        if not line.localizable:
+            return current_translation
+
+        api_key = options.api_key or settings.openai_api_key
+        if not api_key:
+            raise RuntimeError("API Key is required for OpenAI-compatible repair jobs")
+
+        base_url = (options.base_url or settings.openai_base_url).rstrip("/")
+        model = options.model or settings.default_model
+        payload = {
+            "model": model,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": REPAIR_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "source_language": options.source_language,
+                            "target_language": options.target_language,
+                            "role": line.role,
+                            "source_text": line.text,
+                            "protected_tokens": line.protected_tokens,
+                            "current_translation": current_translation,
+                            "failures": failures,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+        headers = {"Authorization": f"Bearer {api_key}"}
+        response = await _post_json_with_retries(
+            self.completion_url(base_url),
+            payload=payload,
+            headers=headers,
+            timeout=120,
+            error_parser=self._extract_error,
+            provider_name="OpenAI-compatible model repair API",
+        )
+        try:
+            body = response.json()
+            content = body["choices"][0]["message"]["content"].strip()
+        except (ValueError, KeyError, IndexError, TypeError):
+            raise RuntimeError(f"Model repair API response missing choices[0].message.content: {response.text}") from None
         try:
             parsed = json.loads(content)
             return str(parsed["translation"]).strip()
@@ -308,6 +387,15 @@ class DryRunTranslator(Translator):
             message="Dry run provider is available locally and does not call an external API.",
         )
 
+    async def repair_translation(
+        self,
+        line: TextLine,
+        current_translation: str,
+        failures: list[dict],
+        options: TranslationOptions,
+    ) -> str:
+        return current_translation
+
 
 class AnthropicCompatibleTranslator(Translator):
     anthropic_version = "2023-06-01"
@@ -415,6 +503,65 @@ class AnthropicCompatibleTranslator(Translator):
             content = "".join(block.get("text", "") for block in text_blocks if isinstance(block, dict)).strip()
         except (KeyError, TypeError):
             raise RuntimeError(f"Anthropic-compatible response missing content text: {body}") from None
+        try:
+            parsed = json.loads(content)
+            return str(parsed["translation"]).strip()
+        except Exception:
+            return content.strip()
+
+    async def repair_translation(
+        self,
+        line: TextLine,
+        current_translation: str,
+        failures: list[dict],
+        options: TranslationOptions,
+    ) -> str:
+        if not line.localizable:
+            return current_translation
+
+        api_key = options.api_key or settings.openai_api_key
+        if not api_key:
+            raise RuntimeError("API Key is required for Anthropic-compatible repair jobs")
+
+        base_url = options.base_url or settings.openai_base_url
+        model = options.model or settings.default_model
+        payload = {
+            "model": model,
+            "max_tokens": 1024,
+            "temperature": 0,
+            "system": REPAIR_SYSTEM_PROMPT,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "source_language": options.source_language,
+                            "target_language": options.target_language,
+                            "role": line.role,
+                            "source_text": line.text,
+                            "protected_tokens": line.protected_tokens,
+                            "current_translation": current_translation,
+                            "failures": failures,
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
+        }
+        response = await _post_json_with_retries(
+            self.messages_url(base_url),
+            payload=payload,
+            headers=self._headers(api_key),
+            timeout=120,
+            error_parser=self._extract_error,
+            provider_name="Anthropic-compatible model repair API",
+        )
+        try:
+            body = response.json()
+            text_blocks = body["content"]
+            content = "".join(block.get("text", "") for block in text_blocks if isinstance(block, dict)).strip()
+        except (ValueError, KeyError, TypeError):
+            raise RuntimeError(f"Anthropic-compatible repair response missing content text: {response.text}") from None
         try:
             parsed = json.loads(content)
             return str(parsed["translation"]).strip()

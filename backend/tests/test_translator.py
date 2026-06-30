@@ -148,3 +148,52 @@ def test_openai_translation_retries_remote_disconnect(monkeypatch) -> None:
 
     assert result == "開を押します。"
     assert calls == 2
+
+
+def test_openai_repair_translation_sends_gate_context(monkeypatch) -> None:
+    captured_payload = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url: str, json: dict, headers: dict[str, str]):
+            captured_payload.update(json)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "{\"translation\":\"「□」を押します。\"}"}}]},
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text='Press "     "',
+        bbox=(0, 0, 100, 20),
+        font_name="Helvetica",
+        font_size=12,
+    )
+
+    result = asyncio.run(
+        OpenAICompatibleTranslator().repair_translation(
+            line,
+            "「 」を押します。",
+            [{"code": "empty_protected_icon_bracket", "message": "empty bracket"}],
+            TranslationOptions(
+                provider="openai_compatible",
+                base_url="https://api.example.com",
+                model="gpt-test",
+                api_key="token",
+            ),
+        )
+    )
+
+    assert result == "「□」を押します。"
+    assert captured_payload["messages"][1]["role"] == "user"
+    assert "empty_protected_icon_bracket" in captured_payload["messages"][1]["content"]

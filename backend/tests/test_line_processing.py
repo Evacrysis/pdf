@@ -89,6 +89,40 @@ def test_fixed_light_labels_are_compact() -> None:
     assert fixed_translation_for(_line(0, "Solid Blue", (10, 10, 80, 25))) == "ブルー点灯"
 
 
+def test_merges_and_fixes_quote_gap_check_channel_rows() -> None:
+    lines = [
+        _line(0, 'Press "    " or "    ",', (373, 381, 504, 402)),
+        _line(1, "check channel.", (373, 396, 474, 416)),
+    ]
+
+    merged = merge_known_semantic_lines(lines)
+
+    assert len(merged) == 1
+    assert merged[0].text == 'Press " " or " ", check channel.'
+    assert fixed_translation_for(merged[0]) == "「□」または「□」を押す\nチャンネル確認"
+
+
+def test_merges_and_fixes_quote_gap_check_group_rows() -> None:
+    lines = [
+        _line(0, 'Press "    " or "    ",', (373, 413, 500, 433)),
+        _line(1, "check group.", (373, 427, 460, 447)),
+    ]
+
+    merged = merge_known_semantic_lines(lines)
+
+    assert len(merged) == 1
+    assert fixed_translation_for(merged[0]) == "「□」または「□」を押す\nグループ確認"
+
+
+def test_fixed_quote_gap_operation_rows_preserve_icon_placeholders() -> None:
+    assert fixed_translation_for(_line(0, 'Press "     "', (10, 10, 90, 25))) == "「□」を押す"
+    assert fixed_translation_for(_line(0, 'Hold "     " for 5s', (10, 10, 90, 25))) == "「□」を5s押し続ける"
+    assert (
+        fixed_translation_for(_line(0, 'Press " " to select other channel numbers.', (10, 10, 90, 25)))
+        == "「□」を押して他のチャンネル番号を選択します。"
+    )
+
+
 def test_continuation_warning_lines_merge_into_one_semantic_block() -> None:
     lines = [
         _warning_line(0, "Congratulations! Remove the sleeping blocker, chooes the channel number", 509.1),

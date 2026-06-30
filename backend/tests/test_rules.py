@@ -124,6 +124,32 @@ def test_output_pdf_gate_rejects_translated_text_over_source_line(tmp_path: Path
     assert any(result.code == "translated_text_overlaps_source_line" for result in results)
 
 
+def test_output_pdf_gate_ignores_lines_inside_owned_body_source_region(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "output.pdf"
+    _write_pdf_with_generated_text(source, [], draw_source_line=True)
+    _write_pdf_with_generated_text(output, [(40, 82, "テキスト")], draw_source_line=True)
+    item = line("source text", "テキスト", role="body")
+    item.source.bbox = (20, 68, 220, 92)
+
+    results = RuleEngine().validate_output_pdf(source, output, [item])
+
+    assert not any(result.code == "translated_text_overlaps_source_line" for result in results)
+
+
+def test_output_pdf_gate_keeps_title_underlines_protected(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "output.pdf"
+    _write_pdf_with_generated_text(source, [], draw_source_line=True)
+    _write_pdf_with_generated_text(output, [(40, 82, "タイトル")], draw_source_line=True)
+    item = line("Title", "タイトル", role="title")
+    item.source.bbox = (20, 68, 220, 92)
+
+    results = RuleEngine().validate_output_pdf(source, output, [item])
+
+    assert any(result.code == "translated_text_overlaps_source_line" for result in results)
+
+
 def test_output_pdf_gate_rejects_overlapping_translated_lines(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     output = tmp_path / "output.pdf"

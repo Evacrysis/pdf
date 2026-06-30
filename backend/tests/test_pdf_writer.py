@@ -157,6 +157,50 @@ def test_write_editable_pdf_keeps_source_icons_for_quote_gap(tmp_path) -> None:
     assert len(images) >= 2
 
 
+def test_write_editable_pdf_uses_source_icons_for_template_placeholders(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "translated.pdf"
+    _make_quote_gap_pdf(source)
+    line = TextLine(
+        page_index=0,
+        line_index=0,
+        text='Press "    " or "    ", check channel.',
+        bbox=(24, 42, 170, 66),
+        origin=(24, 60),
+        font_name="Helvetica",
+        font_size=14,
+        role="body",
+    )
+
+    write_editable_pdf(
+        source,
+        output,
+        [
+            TranslatedLine(
+                source=line,
+                translated_text="「□」または「□」を押す\nチャンネル確認",
+                output_font_size=14,
+            )
+        ],
+        font_path,
+    )
+
+    doc = fitz.open(output)
+    try:
+        text = doc[0].get_text()
+        images = doc[0].get_images(full=True)
+    finally:
+        doc.close()
+
+    assert "□" not in text
+    assert "チャンネル確認" in text
+    assert len(images) >= 2
+
+
 def test_wrap_text_respects_explicit_natural_line_breaks() -> None:
     font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
     if not font_path.exists():
