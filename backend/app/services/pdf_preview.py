@@ -7,7 +7,7 @@ import fitz
 
 def render_page_png(pdf_path: Path, page_index: int, output_path: Path, zoom: float = 1.6) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    if output_path.exists():
+    if output_path.exists() and output_path.stat().st_mtime >= pdf_path.stat().st_mtime:
         return output_path
 
     doc = fitz.open(pdf_path)

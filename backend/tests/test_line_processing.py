@@ -74,7 +74,19 @@ def test_merges_example_operation_paragraph() -> None:
 
 def test_cable_length_uses_metric_only_fixed_translation() -> None:
     assert fixed_translation_for(_line(0, '118"(3m)', (10, 10, 80, 25))) == "3m"
+    assert fixed_translation_for(_line(0, "118ˮ(3m)", (10, 10, 80, 25))) == "3m"
     assert fixed_translation_for(_line(0, '78.7"(2m)', (10, 10, 80, 25))) == "2m"
+
+
+def test_fixed_translation_preserves_compact_time_and_count_tokens() -> None:
+    assert fixed_translation_for(_line(0, "Hold for 16s", (10, 10, 80, 25))) == "16s押し続ける"
+    assert fixed_translation_for(_line(0, "Blind jogs 4x", (10, 10, 80, 25))) == "ブラインドが軽く動きます 4x"
+
+
+def test_fixed_light_labels_are_compact() -> None:
+    assert fixed_translation_for(_line(0, "Orange Light", (10, 10, 80, 25))) == "オレンジランプ"
+    assert fixed_translation_for(_line(0, "Blue Light", (10, 10, 80, 25))) == "ブルーランプ"
+    assert fixed_translation_for(_line(0, "Solid Blue", (10, 10, 80, 25))) == "ブルー点灯"
 
 
 def test_continuation_warning_lines_merge_into_one_semantic_block() -> None:

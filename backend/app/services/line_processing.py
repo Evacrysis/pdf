@@ -130,6 +130,10 @@ FIXED_TRANSLATIONS = {
     "If there are 9 blinds, and you want to open blinds 1, 3, and 5 together, the operation method is: Press 1, 3, and 5 in sequence, and then press \" Open \".": "シェードが9台あり、そのうち1・3・5を同時に開ける場合は、「1」→「3」→「5」の順に押し、その後「開」を押します。",
     "Set key P1": "キーP1を設定",
     "Set key P2": "キーP2を設定",
+    "Orange Light": "オレンジランプ",
+    "Blue Light": "ブルーランプ",
+    "Solid Blue": "ブルー点灯",
+    "Flashing": "点滅",
     "• For Shangri-la Shades": "・シャングリラシェードの場合",
     "• For Zebra Blinds": "・ゼブラブラインドの場合",
     "Only when Shangri-la Shades reach the bottom limit can slats be adjusted.": "シャングリラシェードが下限に達したときのみ、スラットを調整できます。",
@@ -140,7 +144,9 @@ FIXED_TRANSLATIONS = {
 
 
 QUOTE_GAP_RE = re.compile(r'^Press\s+"[\s\u00a0]*"\s+or\s+"[\s\u00a0]*"\s*$')
-CABLE_LENGTH_RE = re.compile(r'^\d+(?:\.\d+)?\s*(?:"|”|″)\s*\((\d+(?:\.\d+)?m)\)$')
+CABLE_LENGTH_RE = re.compile(r'^\d+(?:\.\d+)?\s*(?:"|”|″|ˮ)\s*\((\d+(?:\.\d+)?m)\)$')
+HOLD_FOR_TIME_RE = re.compile(r"^Hold for (\d+s)$", re.IGNORECASE)
+BLIND_JOGS_COUNT_RE = re.compile(r"^Blind jogs (\d+x)$", re.IGNORECASE)
 
 
 def fixed_translation_for(line: TextLine) -> str | None:
@@ -150,4 +156,10 @@ def fixed_translation_for(line: TextLine) -> str | None:
     cable_length = CABLE_LENGTH_RE.match(text)
     if cable_length:
         return cable_length.group(1)
+    hold_for_time = HOLD_FOR_TIME_RE.match(text)
+    if hold_for_time:
+        return f"{hold_for_time.group(1)}押し続ける"
+    blind_jogs_count = BLIND_JOGS_COUNT_RE.match(text)
+    if blind_jogs_count:
+        return f"ブラインドが軽く動きます {blind_jogs_count.group(1)}"
     return FIXED_TRANSLATIONS.get(text)

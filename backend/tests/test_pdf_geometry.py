@@ -13,7 +13,7 @@ def test_protected_tokens_do_not_match_inside_words() -> None:
 
 
 def test_protected_tokens_match_standalone_button_tokens() -> None:
-    text = 'Set key P1, press P2, CH+, CH-, OK, A1, 01, GC, EC, on, 2x.'
+    text = 'Set key P1, press P2, CH+, CH-, OK, A1, 01, GC, EC, 2x, 16s.'
 
     assert PROTECTED_TOKEN_RE.findall(text) == [
         "P1",
@@ -25,9 +25,15 @@ def test_protected_tokens_match_standalone_button_tokens() -> None:
         "01",
         "GC",
         "EC",
-        "on",
         "2x",
+        "16s",
     ]
+
+
+def test_protected_tokens_do_not_match_plain_on_or_decimal_prefix() -> None:
+    text = 'depending on the frequency, 78.7"(2m)'
+
+    assert PROTECTED_TOKEN_RE.findall(text) == []
 
 
 def _line(size: float) -> TextLine:
@@ -58,8 +64,11 @@ def test_battery_artwork_text_is_not_localizable() -> None:
 
 def test_short_bold_codes_are_not_localizable() -> None:
     assert not _is_localizable("S")
+    assert not _is_localizable("s x2")
     assert not _is_localizable("S x2")
     assert not _is_localizable("A1")
+    assert not _is_localizable("16s")
+    assert not _is_localizable("4x")
     assert _is_localizable("Low battery:")
     assert _is_localizable("Back")
 

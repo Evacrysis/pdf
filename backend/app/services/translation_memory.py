@@ -7,7 +7,7 @@ from pathlib import Path
 from app.models import TextLine, TranslationOptions
 
 
-TRANSLATION_MEMORY_VERSION = "2026-06-29-semantic-fixed-rules-v4"
+TRANSLATION_MEMORY_VERSION = "2026-06-30-protected-token-layout-v5"
 
 
 class TranslationMemory:
