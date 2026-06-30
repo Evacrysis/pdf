@@ -230,7 +230,7 @@ def _text_line_overlap_failures(page_index: int, spans: list[dict]) -> list[Gate
         for right in spans[left_index + 1 :]:
             right_rect = fitz.Rect(right["bbox"])
             intersection = left_rect & right_rect
-            if intersection.is_empty or intersection.get_area() <= 2:
+            if intersection.is_empty or not _meaningful_text_overlap(left_rect, right_rect, intersection):
                 continue
             failures.append(
                 GateResult(
@@ -250,6 +250,17 @@ def _text_line_overlap_failures(page_index: int, spans: list[dict]) -> list[Gate
     return failures
 
 
+def _meaningful_text_overlap(left: fitz.Rect, right: fitz.Rect, intersection: fitz.Rect) -> bool:
+    vertical_ratio = intersection.height / max(1.0, min(left.height, right.height))
+    horizontal_ratio = intersection.width / max(1.0, min(left.width, right.width))
+    area_ratio = intersection.get_area() / max(1.0, min(left.get_area(), right.get_area()))
+    if vertical_ratio < 0.18:
+        return False
+    if area_ratio < 0.08 and horizontal_ratio < 0.6:
+        return False
+    return intersection.get_area() > 8
+
+
 def _source_drawing_lines(page: fitz.Page) -> list[fitz.Rect]:
     page_rect = page.rect
     lines: list[fitz.Rect] = []
@@ -260,6 +271,9 @@ def _source_drawing_lines(page: fitz.Page) -> list[fitz.Rect]:
                 continue
             start, end = item[1], item[2]
             if abs(start.x - end.x) <= 1 or abs(start.y - end.y) <= 1:
+                length = max(abs(start.x - end.x), abs(start.y - end.y))
+                if length < 16:
+                    continue
                 pad = max(1.0, width * 0.75)
                 rect = fitz.Rect(start, end).normalize() + (-pad, -pad, pad, pad)
                 clipped = rect & page_rect

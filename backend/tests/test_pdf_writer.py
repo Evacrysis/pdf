@@ -464,6 +464,71 @@ def test_body_text_width_stays_inside_source_content_frame(tmp_path) -> None:
     assert all(x + width <= 533 for width in widths)
 
 
+def test_write_editable_pdf_spaces_adjacent_generated_rows(tmp_path) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "translated.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=260, height=160)
+    page.insert_text(fitz.Point(24, 48), "First line", fontsize=14)
+    page.insert_text(fitz.Point(24, 62), "Second line", fontsize=14)
+    doc.save(source)
+    doc.close()
+
+    lines = [
+        TranslatedLine(
+            source=TextLine(
+                page_index=0,
+                line_index=0,
+                text="First line",
+                bbox=(24, 32, 160, 54),
+                origin=(24, 48),
+                font_name="Helvetica",
+                font_size=14,
+                role="body",
+            ),
+            translated_text="一行目のテキスト",
+            output_font_size=14,
+        ),
+        TranslatedLine(
+            source=TextLine(
+                page_index=0,
+                line_index=1,
+                text="Second line",
+                bbox=(24, 46, 160, 68),
+                origin=(24, 62),
+                font_name="Helvetica",
+                font_size=14,
+                role="body",
+            ),
+            translated_text="二行目のテキスト",
+            output_font_size=14,
+        ),
+    ]
+
+    write_editable_pdf(source, output, lines, font_path)
+
+    doc = fitz.open(output)
+    try:
+        spans = [
+            span
+            for block in doc[0].get_text("dict").get("blocks", [])
+            if block.get("type") == 0
+            for line_data in block.get("lines", [])
+            for span in line_data.get("spans", [])
+            if "NotoSansCJKjp" in str(span.get("font", ""))
+        ]
+    finally:
+        doc.close()
+
+    rects = [fitz.Rect(span["bbox"]) for span in spans if span.get("text", "").strip()]
+    assert len(rects) == 2
+    assert (rects[0] & rects[1]).is_empty
+
+
 def test_right_diagram_label_clamps_to_source_content_frame(tmp_path) -> None:
     font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
     if not font_path.exists():

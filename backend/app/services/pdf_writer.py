@@ -240,7 +240,37 @@ def _line_widths(wrapped: list[str], font: fitz.Font, font_size: float) -> list[
 
 
 def _line_step(font_size: float) -> float:
-    return font_size * 1.5
+    return font_size * 1.65
+
+
+def _estimated_text_rect(x: float, baseline: float, width: float, font_size: float) -> fitz.Rect:
+    return fitz.Rect(x, baseline - font_size, x + width, baseline + font_size * 0.24)
+
+
+def _horizontal_overlap_ratio(left: fitz.Rect, right: fitz.Rect) -> float:
+    overlap = max(0.0, min(left.x1, right.x1) - max(left.x0, right.x0))
+    denominator = max(1.0, min(left.width, right.width))
+    return overlap / denominator
+
+
+def _avoid_generated_overlap(
+    x: float,
+    width: float,
+    baseline: float,
+    font_size: float,
+    placed_rows: list[fitz.Rect],
+) -> float:
+    adjusted = baseline
+    padding = max(1.0, font_size * 0.12)
+    for previous in placed_rows:
+        candidate = _estimated_text_rect(x, adjusted, width, font_size)
+        if _horizontal_overlap_ratio(candidate, previous) < 0.18:
+            continue
+        intersection = candidate & previous
+        if intersection.is_empty:
+            continue
+        adjusted += previous.y1 - candidate.y0 + padding
+    return adjusted
 
 
 def _label_start_x(
@@ -365,6 +395,7 @@ def write_editable_pdf(
         page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
         page.insert_font(fontname=font_name, fontfile=str(font_path))
 
+        placed_rows: list[fitz.Rect] = []
         for item in items:
             src = item.source
             if not src.localizable:
@@ -383,13 +414,23 @@ def write_editable_pdf(
             baseline = _baseline(item)
             x = _label_start_x(page, item, wrapped, font)
             for offset, text in enumerate(wrapped):
+                text_width = font.text_length(text, fontsize=item.output_font_size)
+                row_baseline = _avoid_generated_overlap(
+                    x,
+                    text_width,
+                    baseline + offset * line_step,
+                    item.output_font_size,
+                    placed_rows,
+                )
                 _insert_text(
                     page,
-                    fitz.Point(x, baseline + offset * line_step),
+                    fitz.Point(x, row_baseline),
                     text,
                     font_name,
                     item.output_font_size,
                 )
+                if text:
+                    placed_rows.append(_estimated_text_rect(x, row_baseline, text_width, item.output_font_size))
 
     output_pdf.parent.mkdir(parents=True, exist_ok=True)
     doc.save(output_pdf, garbage=4, deflate=True)

@@ -93,6 +93,26 @@ def _write_pdf_with_generated_text(path: Path, lines: list[tuple[float, float, s
     doc.close()
 
 
+def _write_pdf_with_generated_text_and_line(
+    path: Path,
+    lines: list[tuple[float, float, str, float]],
+    source_line: Optional[tuple[float, float, float, float]] = None,
+) -> None:
+    font_path = Path(__file__).resolve().parents[2] / "fonts" / "NotoSansCJKjp-Regular.ttf"
+    if not font_path.exists():
+        pytest.skip("Japanese test font is not available.")
+    doc = fitz.open()
+    page = doc.new_page(width=260, height=180)
+    if source_line:
+        x0, y0, x1, y1 = source_line
+        page.draw_line(fitz.Point(x0, y0), fitz.Point(x1, y1), color=(0, 0, 0), width=1)
+    page.insert_font(fontname="F0", fontfile=str(font_path))
+    for x, y, text, size in lines:
+        page.insert_text(fitz.Point(x, y), text, fontname="F0", fontsize=size, color=(0, 0, 0))
+    doc.save(path)
+    doc.close()
+
+
 def test_output_pdf_gate_rejects_translated_text_over_source_line(tmp_path: Path) -> None:
     source = tmp_path / "source.pdf"
     output = tmp_path / "output.pdf"
@@ -113,6 +133,31 @@ def test_output_pdf_gate_rejects_overlapping_translated_lines(tmp_path: Path) ->
     results = RuleEngine().validate_output_pdf(source, output)
 
     assert any(result.code == "translated_text_line_overlap" for result in results)
+
+
+def test_output_pdf_gate_ignores_minor_title_bbox_touch(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "output.pdf"
+    _write_pdf_with_generated_text_and_line(source, [])
+    _write_pdf_with_generated_text_and_line(
+        output,
+        [(40, 80, "リモコン", 36), (40, 108.7, "特徴", 24)],
+    )
+
+    results = RuleEngine().validate_output_pdf(source, output)
+
+    assert not any(result.code == "translated_text_line_overlap" for result in results)
+
+
+def test_output_pdf_gate_ignores_tiny_source_line_segments(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    output = tmp_path / "output.pdf"
+    _write_pdf_with_generated_text_and_line(source, [], source_line=(70, 80, 78, 80))
+    _write_pdf_with_generated_text_and_line(output, [(68, 82, "操作例：", 14)])
+
+    results = RuleEngine().validate_output_pdf(source, output)
+
+    assert not any(result.code == "translated_text_overlaps_source_line" for result in results)
 
 
 def test_api_key_is_not_serialized() -> None:
